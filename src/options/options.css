@@ -1,0 +1,45 @@
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #10141c;
+  --panel: #171d28;
+  --ink: #f4f6f8;
+  --muted: #9aa3b2;
+  --line: #313949;
+  --accent: #3dbea5;
+  --accent-ink: #06241e;
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f6f4ef;
+  --panel: #fff;
+  --ink: #1c1915;
+  --muted: #5e584f;
+  --line: #e4ddd2;
+  --accent: #0f7668;
+  --accent-ink: #f4fffb;
+}
+:root { font: 15px/1.45 "Avenir Next", "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+* { box-sizing: border-box; }
+body { margin: 0; }
+button, input, select, textarea { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+button { cursor: pointer; }
+button:disabled { opacity: .45; cursor: default; }
+button[aria-current='true'] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+a { color: inherit; }
+.app { max-width: 1100px; margin: 0 auto; padding: 20px 20px 64px; }
+.app-bar { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.app-bar strong { font-size: 18px; }
+.library { display: flex; flex-direction: column; gap: 12px; }
+.library h2 { margin: 0; }
+.meta { color: var(--muted); margin: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.folders { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px; display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.folders input { width: 100%; min-width: 0; }
+.library .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; }
+.library .posts { display: flex; flex-direction: column; gap: 12px; }
+.library .post { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 12px; padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
+.library .post img, .library .post video { width: 140px; height: 175px; object-fit: cover; border-radius: 10px; background: #000; }
+.caption { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 720px) { .library .layout, .library .post { grid-template-columns: 1fr; } }

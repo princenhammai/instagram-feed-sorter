@@ -1,0 +1,48 @@
+{
+  "name": "instagram-feed-sorter",
+  "private": true,
+  "version": "0.3.2",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && vite build --config vite.offscreen.config.ts && vite build --config vite.main-world.config.ts && node scripts/finish-dist.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "mcp": "node mcp/server.mjs",
+    "test:mcp": "node --test mcp/server.test.mjs",
+    "package": "npm run build && node scripts/package-release.mjs",
+    "package:zip": "node scripts/package-release.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "idb": "^8.0.3",
+    "jszip": "^3.10.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.0.0-beta.32",
+    "@types/chrome": "^0.0.304",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  },
+  "description": "Sort, analyze and export Instagram Reels and posts in your signed-in desktop browser.",
+  "license": "MIT",
+  "author": "Prince Nham Mai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/princenhammai/instagram-feed-sorter.git"
+  },
+  "homepage": "https://github.com/princenhammai/instagram-feed-sorter#readme",
+  "bugs": {
+    "url": "https://github.com/princenhammai/instagram-feed-sorter/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,16 @@
+node_modules/
+dist/
+artifacts/
+coverage/
+.DS_Store
+*.local
+*.log
+.env
+.env.*
+!.env.example
+.codex/
+.cursor/
+.mcp.json
+baseline-sha256.json
+*.pem
+*.key

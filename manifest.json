@@ -1,0 +1,61 @@
+{
+  "manifest_version": 3,
+  "name": "Instagram Feed Sorter",
+  "description": "Sort, analyze, export, download, save, and transcribe Instagram Reels and posts while you are signed in.",
+  "version": "0.3.2",
+  "minimum_chrome_version": "111",
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_title": "Instagram Feed Sorter",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "options_page": "src/options/index.html",
+  "permissions": [
+    "storage",
+    "downloads",
+    "scripting",
+    "offscreen",
+    "cookies",
+    "alarms"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "host_permissions": [
+    "https://api.openai.com/*",
+    "https://docs.google.com/*",
+    "https://www.instagram.com/*",
+    "https://instagram.com/*",
+    "https://*.cdninstagram.com/*",
+    "https://*.fbcdn.net/*",
+    "http://127.0.0.1/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.instagram.com/*",
+        "https://instagram.com/*"
+      ],
+      "js": [
+        "src/content/index.tsx"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
