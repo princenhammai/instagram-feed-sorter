@@ -1,5 +1,4 @@
-import { followerCount, followingPage, searchHashtag, searchReels, searchUsers, similarAccounts } from './api'
-import { loadReelsPage } from './reels-load'
+import { followerCount, followingPage, loadPage, resetReelsSource, searchHashtag, searchReels, searchUsers, similarAccounts } from './api'
 import { notify, patch } from './store'
 import { isRateLimited, reelsUrl } from '../lib/batch'
 import { HttpError } from '../lib/instagram/page-data'
@@ -222,7 +221,7 @@ async function runOnce(): Promise<void> {
     }
     if (found.limited) {
       const partial = applySearchCandidates(latest, keyword, found.hits, Date.now(), false)
-      const message = found.error || 'Instagram is rate limiting this account.'
+      const message = found.error || 'HTTP 429 from Instagram.'
       await saveSnowball(pauseSnowball(partial, message))
       patch({ phase: { type: 'idle' } })
       notify(`${message} Resume the snowball from the research panel when Instagram has calmed down.`)
@@ -258,14 +257,12 @@ async function runOnce(): Promise<void> {
     const latest = await loadSnowball()
     if (!latest || latest.status !== 'running') return
     if (signal.aborted) return
-    let collectedNow = 0
-    const showCollecting = (collected: number, label = `Snowball · @${username}`) => {
-      collectedNow = collected
+    const showCollecting = (collected: number) => {
       patch({
         phase: {
           type: 'collecting',
           collected,
-          label,
+          label: `Snowball · @${username}`,
           percent: latest.settings.reelsPerAccount > 0 ? Math.min(100, (collected / latest.settings.reelsPerAccount) * 100) : null,
           scrolling: false,
         },
@@ -273,12 +270,13 @@ async function runOnce(): Promise<void> {
     }
     let followers: number | null = null
     try {
+      resetReelsSource(username)
       const result = await collectPosts({
         limit: latest.settings.reelsPerAccount,
         delayMs: latest.settings.delayMs,
         signal,
         onProgress: (collected) => showCollecting(collected),
-        load: (maxId) => loadReelsPage(username, maxId, signal, (message) => showCollecting(collectedNow, message)),
+        load: (maxId) => loadPage({ kind: 'reels', username }, maxId),
       })
       try {
         followers = await followerCount(username)

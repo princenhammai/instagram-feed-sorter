@@ -4,7 +4,6 @@ import { shortcodeToId } from '../lib/instagram/ids'
 import { fillMissingMedia } from '../lib/instagram/capture'
 import { normalizeMedia, normalizeStoryItem } from '../lib/instagram/normalize'
 import { accountsInSearch } from '../lib/instagram/search'
-import { isRateLimit } from '../lib/instagram/page-data'
 import type { PageBatch } from '../lib/instagram/collect'
 import type { Post, SimilarAccount, SortableSurface } from '../lib/types'
 
@@ -67,7 +66,7 @@ export async function loadPage(surface: SortableSurface, maxId: string | undefin
       const raw = await callMain({ action: 'clips', userId: id, maxId })
       return { posts: keepAuthor(normalizeList(raw), surface.username), nextMaxId: extractNext(raw) }
     } catch (error) {
-      if (maxId || isRateLimit(error)) throw error
+      if (maxId) throw error
       reelsFromFeed.add(key)
       return reelsFromMainFeed(id, surface.username, undefined)
     }

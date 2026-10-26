@@ -186,14 +186,12 @@ export function reelKey(username: string, shortcode: string): string {
   return `${username.trim().toLowerCase()}:${shortcode.trim()}`
 }
 
-const RATE_PHRASE = /rate[\s-]?limit|http\s*429\b|please wait a few minutes|feedback_required|try again later/i
+const REAL_LIMIT = /\bHTTP\s+429\b|\bfeedback_required\b/i
 
 export function isRateLimited(message: string | null | undefined, status?: number): boolean {
   if (status === 429) return true
   if (!message) return false
-  const text = message.trim()
-  if (text.length === 0 || text.length > 240) return false
-  return RATE_PHRASE.test(text)
+  return REAL_LIMIT.test(message)
 }
 
 export function compactReel(post: Post, seenBefore = false): StoredReel {

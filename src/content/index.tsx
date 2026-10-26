@@ -15,6 +15,12 @@ if (!flag.__IFS_BOOTED__) {
   const mount = document.createElement('div')
   shadow.append(style, mount)
   document.documentElement.append(host)
+  const blockPageShortcuts = (event: Event) => {
+    if (event.composedPath().includes(host)) event.stopPropagation()
+  }
+  for (const type of ['keydown', 'keypress', 'keyup']) {
+    window.addEventListener(type, blockPageShortcuts, true)
+  }
   createRoot(mount).render(<App />)
   init()
   chrome.runtime.onMessage.addListener(onMessage)

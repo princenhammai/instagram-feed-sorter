@@ -13,6 +13,7 @@ export interface ReelGroup {
   username: string
   followers: number | null
   reels: StoredReel[]
+  provenance?: string
 }
 
 export interface ResearchRow {
@@ -25,6 +26,7 @@ export interface ResearchRow {
   engagementRate: number | null
   likelyPaid: boolean
   followers: number | null
+  provenance: string
   post: Post
 }
 
@@ -43,6 +45,7 @@ export function researchRows(groups: ReelGroup[]): ResearchRow[] {
         engagementRate: post.engagementRate ?? null,
         likelyPaid: Boolean(post.likelyPaid),
         followers: group.followers,
+        provenance: group.provenance || '',
         post,
       })
     }
@@ -63,7 +66,7 @@ export function orderResearchRows(rows: ResearchRow[], sort: ResearchSort, hideP
 
 export function researchReelTable(rows: ResearchRow[]): (string | number | null)[][] {
   return [
-    ['Account', 'Hook', 'Views', '× median', 'Engagement rate', 'Paid', 'URL'],
+    ['Account', 'Hook', 'Views', '× median', 'Engagement rate', 'Paid', 'Provenance', 'URL'],
     ...rows.map((row) => [
       row.username,
       row.hook,
@@ -71,6 +74,7 @@ export function researchReelTable(rows: ResearchRow[]): (string | number | null)
       row.medianScore,
       row.engagementRate == null ? null : Math.round(row.engagementRate * 10_000) / 100,
       row.likelyPaid ? 'Yes' : '',
+      row.provenance,
       row.url,
     ]),
   ]

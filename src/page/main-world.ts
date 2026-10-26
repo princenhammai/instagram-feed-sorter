@@ -2,7 +2,7 @@ import { extractFollowerCounts, extractItems, extractUserId, extractUsers } from
 import { accountSearchUrl, hashtagUrl, reelsSearchUrl, topSerpUrl, userSearchUrl } from '../lib/instagram/search'
 import { isInstagramDataUrl, mergePost, parseBodies } from '../lib/instagram/capture'
 import { normalizeMedia } from '../lib/instagram/normalize'
-import { findUserIdInText, HttpError, httpFailureMessage } from '../lib/instagram/page-data'
+import { findUserIdInText, hasFeedbackRequired, HttpError, httpFailureMessage, responseSnippet } from '../lib/instagram/page-data'
 import type { Post, SimilarAccount } from '../lib/types'
 import { ISO_SOURCE, MAIN_SOURCE, type MainCall } from '../lib/protocol'
 
@@ -56,6 +56,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   })
 }
 
+function reportTrace(url: string, status: number, snippet: string): void {
+  const nonce = document.documentElement.getAttribute('data-ifs-nonce')
+  window.postMessage(
+    { source: MAIN_SOURCE, type: 'TRACE', nonce, url, status, snippet: snippet.slice(0, 180) },
+    window.location.origin,
+  )
+}
+
 async function igFetch(url: string, init: RequestInit = {}, retries = RETRY_DELAYS.length): Promise<unknown> {
   for (let attempt = 0; ; attempt += 1) {
     const response = await fetch(url, {
@@ -63,23 +71,32 @@ async function igFetch(url: string, init: RequestInit = {}, retries = RETRY_DELA
       ...init,
       headers: { ...headers(), ...(init.headers as Record<string, string> | undefined) },
     })
-    if (response.status === 429 && attempt < retries) {
-      await response.body?.cancel().catch(() => undefined)
+    const text = await response.text()
+    const snippet = responseSnippet(text) || (response.ok ? 'ok' : '')
+    reportTrace(url, response.status, snippet)
+    const feedback = hasFeedbackRequired(text)
+    if (response.status === 429 && !feedback && attempt < retries) {
       await wait(retryAfterMs(response) ?? RETRY_DELAYS[attempt])
       continue
     }
-    const text = await response.text()
     if (response.status === 401 || response.status === 403) {
       throw new HttpError(
         `${httpFailureMessage(response.status, text)} Refresh the page and make sure you are signed in.`,
         response.status,
+        url,
+        snippet,
       )
     }
-    if (!response.ok) throw new HttpError(httpFailureMessage(response.status, text), response.status)
+    if (!response.ok || feedback) throw new HttpError(httpFailureMessage(response.status, text), response.status, url, snippet)
     try {
       return JSON.parse(text) as unknown
     } catch {
-      throw new HttpError('Instagram returned a page instead of post data. Refresh and try again.', response.status)
+      throw new HttpError(
+        'Instagram returned a page instead of post data. Refresh and try again.',
+        response.status,
+        url,
+        snippet || 'Instagram returned HTML instead of JSON.',
+      )
     }
   }
 }
@@ -105,17 +122,6 @@ async function profile(username: string): Promise<unknown> {
     userIds.set(username.toLowerCase(), known)
     return { data: { user: { id: known } } }
   }
-  if (viewingProfile(username)) {
-    const deadline = Date.now() + 6000
-    while (Date.now() < deadline) {
-      await wait(250)
-      const id = cachedUserId(username)
-      if (id) {
-        userIds.set(username.toLowerCase(), id)
-        return { data: { user: { id } } }
-      }
-    }
-  }
   try {
     const raw = await igFetch(
       `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
@@ -123,7 +129,6 @@ async function profile(username: string): Promise<unknown> {
     ingest(raw)
     return raw
   } catch (error) {
-    if (error instanceof HttpError && error.status === 429) throw error
     const search = (await igFetch(accountSearchUrl(username)).catch(() => null)) as {
       users?: { user?: { username?: string; pk?: unknown; pk_id?: unknown } }[]
     } | null
@@ -497,8 +502,10 @@ if (!pageWindow.__ifsMainInstalled) {
     .catch((error: unknown) => {
       const message = error instanceof Error ? error.message : 'Instagram did not answer.'
       const status = error instanceof HttpError ? error.status : 0
+      const url = error instanceof HttpError ? error.url : ''
+      const snippet = error instanceof HttpError ? error.snippet : ''
       window.postMessage(
-        { source: MAIN_SOURCE, nonce: data.nonce, id: data.id, error: message, status },
+        { source: MAIN_SOURCE, nonce: data.nonce, id: data.id, error: message, status, url, snippet },
         window.location.origin,
       )
     })

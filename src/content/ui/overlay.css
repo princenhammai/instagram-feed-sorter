@@ -477,7 +477,40 @@ input:focus, select:focus { outline: 1px solid var(--accent); border-color: tran
 .research-panel .hook { max-width: 160px; color: var(--muted); }
 .research-panel .empty { color: var(--muted); }
 .research-panel .paid { margin-left: 6px; color: var(--danger); font-size: 10px; font-weight: 700; text-transform: uppercase; }
-.research-panel .check { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; }
+.research-count { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.research-count input { width: 6.5rem; }
+.research-log { display: flex; flex-direction: column; gap: 4px; }
+.research-debug {
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--muted);
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.research-results .spread { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.research-panel .check {
+  position: static;
+  top: auto;
+  left: auto;
+  width: auto;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 400;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--muted);
+}
+.research-panel .source { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
 .research-actions { position: sticky; bottom: 0; display: flex; gap: 8px; padding-top: 8px; background: var(--panel); }
 .research-actions button { flex: 1; }
 .finder { pointer-events: auto; position: fixed; z-index: 11; right: 16px; top: 72px; display: flex; flex-direction: column; align-items: flex-end; }

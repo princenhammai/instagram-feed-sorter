@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type SyntheticEvent } from 'react'
 import { collectCandidates, exportCandidates, loadCandidates, sendCandidatesToBatch, DEFAULT_FOLLOWING } from '../finder'
 import { DEFAULT_DELAY_MS, DEFAULT_REELS } from '../../lib/batch'
 import type { Candidate } from '../../lib/candidates'
@@ -71,8 +71,13 @@ export function FinderDock({ username }: { username: string }) {
 
   const listed = added
 
+  const isolate = (event: SyntheticEvent) => {
+    event.stopPropagation()
+    event.nativeEvent.stopImmediatePropagation()
+  }
+
   return (
-    <div className="finder">
+    <div className="finder" onKeyDown={isolate} onKeyUp={isolate} onKeyPress={isolate} onMouseDown={isolate}>
       <button type="button" className="primary" onClick={() => (open ? setOpen(false) : void run())}>
         {busy ? 'Finding accounts…' : 'Find accounts'}
       </button>

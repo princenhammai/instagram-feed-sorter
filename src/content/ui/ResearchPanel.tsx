@@ -1,11 +1,21 @@
+import type { SyntheticEvent } from 'react'
 import { formatCount, formatMultiple, formatPercent } from '../../lib/format'
 import { TOP_DOWNLOAD, VISIBLE_CAP, type ResearchMode, type ResearchRow, type ResearchSort } from '../../lib/research-table'
+
+function isolate(event: SyntheticEvent) {
+  event.stopPropagation()
+  event.nativeEvent.stopImmediatePropagation()
+}
 
 export function ResearchPanel({
   seeds,
   onSeeds,
   keywords = '',
   onKeywords = () => undefined,
+  reels = '100',
+  onReels = () => undefined,
+  reelsMax = 200,
+  debug = [],
   mode,
   onMode,
   running,
@@ -32,6 +42,10 @@ export function ResearchPanel({
   onSeeds: (value: string) => void
   keywords?: string
   onKeywords?: (value: string) => void
+  reels?: string
+  onReels?: (value: string) => void
+  reelsMax?: number
+  debug?: string[]
   mode: ResearchMode
   onMode: (mode: ResearchMode) => void
   running: boolean
@@ -56,7 +70,14 @@ export function ResearchPanel({
 }) {
   const visible = rows.slice(0, VISIBLE_CAP)
   return (
-    <section className="research-panel" aria-label="Research">
+    <section
+      className="research-panel"
+      aria-label="Research"
+      onKeyDown={isolate}
+      onKeyUp={isolate}
+      onKeyPress={isolate}
+      onMouseDown={isolate}
+    >
       <header className="research-head">
         <div>
           <p className="kicker">Research</p>
@@ -87,6 +108,19 @@ export function ResearchPanel({
         </label>
       )}
 
+      <label className="research-count">
+        Reels per account
+        <input
+          type="number"
+          min={1}
+          max={reelsMax}
+          inputMode="numeric"
+          value={reels}
+          aria-label="Reels per account"
+          onChange={(event) => onReels(event.target.value)}
+        />
+      </label>
+
       <div className="segment" role="group" aria-label="Run mode">
         <button type="button" aria-pressed={mode === 'batch'} onClick={() => onMode('batch')}>
           Batch
@@ -97,8 +131,8 @@ export function ResearchPanel({
       </div>
       <p className="note">
         {mode === 'batch'
-          ? 'Loads 100 Reels the same way a single-profile sort does, 1.2s apart. A rate limit waits and shows the HTTP status.'
-          : 'Scores 30 Reels. Keywords add up to 15 accounts each as search: keyword, then the same STRONG expansion.'}
+          ? 'Same Reels loader as a single-profile sort, 1.2s apart. Only HTTP 429 or feedback_required pauses the run.'
+          : 'Keywords add up to 15 accounts each as search: keyword, then the same STRONG expansion.'}
       </p>
 
       <div className="row">
@@ -129,6 +163,13 @@ export function ResearchPanel({
         </p>
       )}
       {status && !alert && <p className="research-ok">{status}</p>}
+
+      <div className="research-log">
+        <p className="kicker">Request log</p>
+        <pre className="research-debug" aria-label="Request log">
+          {debug.length === 0 ? 'No Instagram requests yet.' : debug.join('\n')}
+        </pre>
+      </div>
 
       <div className="research-results">
         <div className="spread">
@@ -163,7 +204,10 @@ export function ResearchPanel({
               )}
               {visible.map((row) => (
                 <tr key={`${row.username}-${row.shortcode}`}>
-                  <td>@{row.username}</td>
+                  <td>
+                    @{row.username}
+                    {row.provenance ? <span className="source">{row.provenance}</span> : null}
+                  </td>
                   <td className="hook" title={row.hook}>
                     {row.hook || '—'}
                     {row.likelyPaid ? <span className="paid">Paid</span> : null}

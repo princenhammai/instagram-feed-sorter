@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { applyAccountOutcome, createJob, isRateLimited, scoreAccount, uniquePosts } from '../batch'
-import { httpFailureMessage, responseSnippet } from './page-data'
+import { formatRequestLine, hasFeedbackRequired, httpFailureMessage, responseSnippet } from './page-data'
 import { withResearch } from '../research'
 import { extractFollowerCounts, extractItems, extractNext, extractUsers } from './extract'
 import { clipsPage, clipsPageEnd, followingPage, privateBody, profileSuggestions, rateLimitBody } from './fixtures'
@@ -57,23 +57,44 @@ describe('instagram response fixtures', () => {
     const scored = scoreAccount(saved.job.accounts[0]?.reels ?? [], 120034)
     expect(scored.find((post) => post.shortcode === 'C0PaidReel1')?.likelyPaid).toBe(true)
 
-    expect(isRateLimited(rateLimitBody.message)).toBe(true)
-    expect(isRateLimited(String(rateLimitBody.feedback_title))).toBe(true)
+    expect(isRateLimited(rateLimitBody.message)).toBe(false)
+    expect(isRateLimited(String(rateLimitBody.feedback_title))).toBe(false)
+    expect(isRateLimited('Instagram is rate limiting this account.')).toBe(false)
     const http429 = httpFailureMessage(429, JSON.stringify(rateLimitBody))
     expect(http429).toBe('HTTP 429 from Instagram. Please wait a few minutes before you try again. Try Again Later')
     expect(isRateLimited(http429, 429)).toBe(true)
+    expect(isRateLimited(http429)).toBe(true)
+    const feedback = httpFailureMessage(400, JSON.stringify({ message: 'feedback_required', spam: true }))
+    expect(hasFeedbackRequired(JSON.stringify({ message: 'feedback_required', spam: true }))).toBe(true)
+    expect(hasFeedbackRequired(JSON.stringify(rateLimitBody))).toBe(false)
+    expect(isRateLimited(feedback, 400)).toBe(true)
     expect(isRateLimited('user id 4290012345 loaded 12 reels')).toBe(false)
     expect(isRateLimited(`${'x'.repeat(230)} try again later`)).toBe(false)
+    expect(formatRequestLine(429, 'https://www.instagram.com/api/v1/clips/user/', 'Please wait a few minutes before you try again.')).toBe(
+      'HTTP 429 /api/v1/clips/user/ — Please wait a few minutes before you try again.',
+    )
     expect(responseSnippet('<!doctype html><html>try again later</html>')).toBe('Instagram returned HTML instead of JSON.')
     const paused = applyAccountOutcome(saved.job, 'bob', { followers: null, posts: [], thrown: http429 }, new Set(), 11)
     expect(paused.type).toBe('pause')
     expect(paused.job.index).toBe(1)
     expect(paused.job.note).toContain('HTTP 429')
-    const limited = applyAccountOutcome(saved.job, 'bob', { followers: null, posts: [], thrown: rateLimitBody.message }, new Set(), 11)
+    const textOnly = applyAccountOutcome(saved.job, 'bob', { followers: null, posts: [], thrown: rateLimitBody.message }, new Set(), 11)
+    expect(textOnly.type).toBe('saved')
+    if (textOnly.type !== 'saved') return
+    expect(textOnly.job.index).toBe(2)
+    expect(textOnly.job.status).toBe('done')
+    const limited = applyAccountOutcome(
+      { ...saved.job, status: 'running' },
+      'bob',
+      { followers: null, posts: [], thrown: feedback },
+      new Set(),
+      11,
+    )
     expect(limited.type).toBe('pause')
     expect(limited.job.index).toBe(1)
     expect(limited.job.status).toBe('paused')
     expect(limited.job.accounts).toHaveLength(1)
+    expect(limited.job.note).toContain('feedback_required')
 
     const denied = applyAccountOutcome(
       { ...limited.job, status: 'running' },

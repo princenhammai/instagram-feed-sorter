@@ -1,5 +1,4 @@
-import { followerCount } from './api'
-import { loadReelsPage } from './reels-load'
+import { followerCount, loadPage, resetReelsSource } from './api'
 import { getSnap, notify, patch, type BatchProgress } from './store'
 import {
   BATCH_KEY,
@@ -210,15 +209,13 @@ async function runOnce(): Promise<void> {
   const known = seenKeySet(await loadSeen())
   if (signal.aborted) return
 
-  let collectedNow = 0
-  const showCollecting = (collected: number, label = `${latest.index + 1}/${latest.handles.length} · @${handle}`) => {
-    collectedNow = collected
+  const showCollecting = (collected: number) => {
     const progress = progressLabel(latest, collected)
     patch({
       phase: {
         type: 'collecting',
         collected,
-        label,
+        label: `${latest.index + 1}/${latest.handles.length} · @${handle}`,
         percent: latest.reelsPerAccount > 0 ? Math.min(100, (collected / latest.reelsPerAccount) * 100) : null,
         scrolling: false,
       },
@@ -228,12 +225,13 @@ async function runOnce(): Promise<void> {
 
   let followers: number | null = null
   try {
+    resetReelsSource(handle)
     const result = await collectPosts({
       limit: latest.reelsPerAccount,
       delayMs: latest.delayMs,
       signal,
       onProgress: (collected) => showCollecting(collected),
-      load: (maxId) => loadReelsPage(handle, maxId, signal, (message) => showCollecting(collectedNow, message)),
+      load: (maxId) => loadPage({ kind: 'reels', username: handle }, maxId),
     })
     try {
       followers = await followerCount(handle)

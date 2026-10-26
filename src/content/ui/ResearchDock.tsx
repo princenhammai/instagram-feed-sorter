@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ResearchPanel } from './ResearchPanel'
 import { kickBatch, loadJob, markPaused, markResumed, queueBatch, resumeBatch } from '../batch-run'
+import { hydrateTraces, REQUEST_LOG_KEY, useRequestLog } from '../request-log'
 import { downloadRanked, stopCollect } from '../controller'
 import { markSnowballPaused, markSnowballResumed, resumeSnowballRun } from '../snowball-run'
 import { useSnap } from '../store'
@@ -9,6 +10,7 @@ import {
   BATCH_PROGRESS_KEY,
   DEFAULT_DELAY_MS,
   DEFAULT_REELS,
+  clampReels,
   batchSummaryTable,
   parseHandles,
   reelsUrl,
@@ -30,6 +32,7 @@ import {
 } from '../../lib/research-table'
 import {
   DEFAULT_SNOWBALL_REELS,
+  MAX_SNOWBALL_REELS,
   SNOWBALL_KEY,
   SNOWBALL_PROGRESS_KEY,
   createSnowball,
@@ -44,7 +47,7 @@ import { buildWorkbook } from '../../lib/xlsx'
 
 function problemNote(note: string | undefined, status: string | undefined): string {
   if (!note || status === 'done' || note === 'Paused.') return ''
-  if (/rate limit|429|please wait|daily cap|could not|didn't|private|error/i.test(note)) return note
+  if (/rate limit|429|feedback_required|please wait|daily cap|could not|didn't|private|error/i.test(note)) return note
   return ''
 }
 
@@ -61,8 +64,11 @@ export function ResearchDock() {
   const [open, setOpen] = useState(false)
   const [seeds, setSeeds] = useState('')
   const [keywords, setKeywords] = useState('')
+  const [reels, setReels] = useState(String(DEFAULT_REELS))
   const [edited, setEdited] = useState(false)
   const [keywordsEdited, setKeywordsEdited] = useState(false)
+  const [reelsEdited, setReelsEdited] = useState(false)
+  const debug = useRequestLog()
   const [mode, setMode] = useState<ResearchMode>('batch')
   const [batchJob, setBatchJob] = useState<BatchJob | null>(null)
   const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null)
@@ -78,7 +84,8 @@ export function ResearchDock() {
 
   useEffect(() => {
     const load = async () => {
-      const stored = await chrome.storage.local.get([BATCH_PROGRESS_KEY, SNOWBALL_KEY, SNOWBALL_PROGRESS_KEY, RESEARCH_OPEN_KEY])
+      const stored = await chrome.storage.local.get([BATCH_PROGRESS_KEY, SNOWBALL_KEY, SNOWBALL_PROGRESS_KEY, RESEARCH_OPEN_KEY, REQUEST_LOG_KEY])
+      hydrateTraces(stored[REQUEST_LOG_KEY])
       const batch = await loadJob()
       const snow = isSnowballJob(stored[SNOWBALL_KEY]) ? stored[SNOWBALL_KEY] : null
       setBatchJob(batch)
@@ -116,6 +123,11 @@ export function ResearchDock() {
   }, [mode, batchJob, snowJob, edited])
 
   useEffect(() => {
+    if (reelsEdited) return
+    setReels(String(mode === 'batch' ? DEFAULT_REELS : DEFAULT_SNOWBALL_REELS))
+  }, [mode, reelsEdited])
+
+  useEffect(() => {
     if (keywordsEdited || keywordsHydrated.current) return
     const next = snowJob?.keywords?.join('\n')
     if (!next) return
@@ -137,7 +149,12 @@ export function ResearchDock() {
     if (snowJob) {
       return snowJob.accounts
         .filter((account) => (account.reels?.length ?? 0) > 0)
-        .map((account) => ({ username: account.username, followers: account.followers, reels: account.reels ?? [] }))
+        .map((account) => ({
+          username: account.username,
+          followers: account.followers,
+          reels: account.reels ?? [],
+          provenance: account.provenance,
+        }))
     }
     return []
   }, [mode, batchJob, snowJob])
@@ -160,12 +177,15 @@ export function ResearchDock() {
       setAlert('Paste a seed handle or a keyword.')
       return
     }
+    const typedReels = Number(reels)
+    const batchCount = clampReels(reels.trim() === '' || !Number.isFinite(typedReels) ? DEFAULT_REELS : typedReels)
+    const snowCount = reels.trim() === '' || !Number.isFinite(typedReels) ? DEFAULT_SNOWBALL_REELS : typedReels
     if (mode === 'batch') {
       if (snowJob?.status === 'running') {
         setAlert('Pause the snowball before running a batch.')
         return
       }
-      const url = await queueBatch(handles, DEFAULT_REELS, DEFAULT_DELAY_MS)
+      const url = await queueBatch(handles, batchCount, DEFAULT_DELAY_MS)
       const here = location.pathname.replace(/\/+$/, '')
       if (here.toLowerCase() === `/${handles[0]}/reels`.toLowerCase()) kickBatch()
       else location.assign(url)
@@ -176,7 +196,12 @@ export function ResearchDock() {
       return
     }
     const picked = handles.slice(0, 20)
-    const job = createSnowball(picked, { reelsPerAccount: DEFAULT_SNOWBALL_REELS, delayMs: DEFAULT_DELAY_MS }, Date.now(), terms)
+    const job = createSnowball(
+      picked,
+      { reelsPerAccount: Math.min(MAX_SNOWBALL_REELS, Math.max(1, Math.round(snowCount))), delayMs: DEFAULT_DELAY_MS },
+      Date.now(),
+      terms,
+    )
     await chrome.storage.local.set({ [SNOWBALL_KEY]: job, [SNOWBALL_PROGRESS_KEY]: progressLabel(job) })
     const trimmed: string[] = []
     if (picked.length < handles.length) trimmed.push('the first 20 handles')
@@ -369,6 +394,13 @@ export function ResearchDock() {
             setKeywordsEdited(true)
             setKeywords(value)
           }}
+          reels={reels}
+          onReels={(value) => {
+            setReelsEdited(true)
+            setReels(value)
+          }}
+          reelsMax={mode === 'batch' ? 200 : MAX_SNOWBALL_REELS}
+          debug={debug}
           mode={mode}
           onMode={setMode}
           running={Boolean(running)}

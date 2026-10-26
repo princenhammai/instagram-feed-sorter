@@ -26,6 +26,7 @@ const rows = orderResearchRows(
     {
       username: 'ada',
       followers: 80_000,
+      provenance: 'search: barber',
       reels: [
         reel('ada', 'a1', 10_000, 400, 'The first line is the hook'),
         reel('ada', 'a2', 10_000, 380, 'Another ordinary reel'),
@@ -37,6 +38,7 @@ const rows = orderResearchRows(
     {
       username: 'bea',
       followers: 40_000,
+      provenance: 'search: nail art',
       reels: [
         reel('bea', 'b1', 9_000, 800, 'Comments carried this one'),
         reel('bea', 'b2', 9_000, 200, 'Quiet reel'),
@@ -60,12 +62,18 @@ function Screen({ which }: { which: 'seed' | 'results' }) {
           <ResearchPanel
             seeds={'@ada\n@bea\nhttps://www.instagram.com/cara/'}
             onSeeds={() => undefined}
+            keywords={'barber\nnail art'}
+            onKeywords={() => undefined}
+            reels="30"
+            onReels={() => undefined}
+            reelsMax={100}
+            debug={['HTTP 200 /api/v1/clips/user/', 'HTTP 429 /api/v1/clips/user/ — feedback_required']}
             mode="snowball"
             onMode={() => undefined}
             running={false}
             paused
             progress="Snowball paused · Depth 0 · 1/20 STRONG · 1/40 today"
-            alert="Instagram is rate limiting this account. Resume when it has calmed down."
+            alert="HTTP 429 from Instagram. feedback_required"
             status=""
             rows={[]}
             shown={0}
@@ -93,6 +101,9 @@ function Screen({ which }: { which: 'seed' | 'results' }) {
         <ResearchPanel
           seeds={'@ada\n@bea'}
           onSeeds={() => undefined}
+          reels="100"
+          onReels={() => undefined}
+          debug={['HTTP 200 /api/v1/feed/user/1/?count=12']}
           mode="batch"
           onMode={() => undefined}
           running={false}

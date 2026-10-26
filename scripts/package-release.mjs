@@ -106,6 +106,15 @@ for (const [name, body] of files) {
   const entry = verified.file(name)
   if (!entry || !(await entry.async('nodebuffer')).equals(body)) throw new Error(`ZIP verification failed: ${name}`)
 }
+const requiredUi = ['Find accounts', 'Keywords', 'search: keyword', 'Reels per account', 'Request log']
+const unpacked = [...files.entries()]
+  .filter(([name]) => /\.(?:js|html|css|json|md)$/.test(name))
+  .map(([, body]) => body.toString('utf8'))
+  .join('\n')
+for (const text of requiredUi) {
+  if (!unpacked.includes(text)) throw new Error(`Packaged bundle is missing UI string: ${text}`)
+}
+
 const filename = `instagram-feed-sorter-v${pkg.version}.zip`
 const checksum = createHash('sha256').update(bytes).digest('hex')
 await mkdir(output, { recursive: true })

@@ -20,11 +20,19 @@ export function findUserIdInText(text: string, username: string): string | undef
 }
 
 export class HttpError extends Error {
+  readonly url: string
+  readonly snippet: string
+
   constructor(
     message: string,
     readonly status: number,
+    url = '',
+    snippet = '',
   ) {
     super(message)
+    this.name = 'HttpError'
+    this.url = url
+    this.snippet = snippet
   }
 }
 
@@ -52,8 +60,37 @@ export function responseSnippet(body: string, limit = 180): string {
   return trimmed.replace(/\s+/g, ' ').slice(0, limit)
 }
 
+export function hasFeedbackRequired(body: string): boolean {
+  if (!body || !/feedback_required/i.test(body)) return false
+  try {
+    const parsed = JSON.parse(body) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false
+    const record = parsed as Record<string, unknown>
+    if (record.feedback_required === true) return true
+    return ['message', 'feedback_title', 'feedback_message'].some(
+      (key) => typeof record[key] === 'string' && /feedback_required/i.test(record[key]),
+    )
+  } catch {
+    return /"message"\s*:\s*"feedback_required"/i.test(body) || /"feedback_required"\s*:\s*true/i.test(body)
+  }
+}
+
 export function httpFailureMessage(status: number, body: string): string {
   const snippet = responseSnippet(body)
   const head = `HTTP ${status} from Instagram.`
-  return snippet ? `${head} ${snippet}` : head
+  const extra = hasFeedbackRequired(body) && !/feedback_required/i.test(snippet) ? 'feedback_required' : ''
+  return [head, snippet, extra].filter(Boolean).join(' ')
+}
+
+export function formatRequestLine(status: number, url: string, snippet = ''): string {
+  let path = url
+  try {
+    const parsed = new URL(url)
+    path = `${parsed.pathname}${parsed.search}`
+  } catch {
+    path = url
+  }
+  const text = snippet.trim()
+  if (!text || text === 'ok') return `HTTP ${status} ${path}`
+  return `HTTP ${status} ${path} — ${text}`
 }

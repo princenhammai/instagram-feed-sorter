@@ -1,5 +1,6 @@
 import { HttpError } from '../lib/instagram/page-data'
 import { ISO_SOURCE, MAIN_SOURCE, type MainCall } from '../lib/protocol'
+import { recordTrace } from './request-log'
 
 const NONCE_ATTR = 'data-ifs-nonce'
 
@@ -39,18 +40,38 @@ window.addEventListener('message', (event) => {
   if (event.source !== window) return
   const data = event.data as {
     source?: string
+    type?: string
     nonce?: string
     id?: string
     payload?: unknown
     error?: string
     status?: number
+    url?: string
+    snippet?: string
   }
-  if (!data || data.source !== MAIN_SOURCE || data.nonce !== nonce || !data.id) return
+  if (!data || data.source !== MAIN_SOURCE || data.nonce !== nonce) return
+  if (data.type === 'TRACE') {
+    recordTrace({
+      url: typeof data.url === 'string' ? data.url : '',
+      status: typeof data.status === 'number' ? data.status : 0,
+      snippet: typeof data.snippet === 'string' ? data.snippet : '',
+    })
+    return
+  }
+  if (!data.id) return
   const job = pending.get(data.id)
   if (!job) return
   pending.delete(data.id)
-  if (data.error) job.reject(new HttpError(data.error, typeof data.status === 'number' ? data.status : 0))
-  else job.resolve(data.payload)
+  if (data.error) {
+    job.reject(
+      new HttpError(
+        data.error,
+        typeof data.status === 'number' ? data.status : 0,
+        typeof data.url === 'string' ? data.url : '',
+        typeof data.snippet === 'string' ? data.snippet : '',
+      ),
+    )
+  } else job.resolve(data.payload)
 })
 
 export function callMain(call: MainCall, timeoutMs = 60000): Promise<unknown> {

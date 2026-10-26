@@ -44,6 +44,10 @@ describe('research table', () => {
     expect(ordered.some((row) => row.likelyPaid)).toBe(false)
     expect(ordered[0]?.medianScore).toBe(8)
     expect(ordered[0]?.hook).toBe('This one traveled')
+    const sourced = researchRows([
+      { username: 'cara', followers: 1000, provenance: 'search: barber', reels: [reel('cara', 'c1', 500, 20)] },
+    ])
+    expect(sourced[0]?.provenance).toBe('search: barber')
   })
 
   it('can sort by engagement and reveal paid rows', () => {

@@ -94,6 +94,7 @@ export function App() {
       )}
       {snap.phase.type === 'ready' && <Workspace key={snap.phase.runId} model={snap.phase.model} />}
       <ResearchDock />
+      <ProfileFinder />
       {snap.phase.type === 'idle' && <PageTools />}
     </div>
   )
@@ -1124,6 +1125,13 @@ function Similar({ username, range, sortKey }: { username: string; range: RangeC
   )
 }
 
+function ProfileFinder() {
+  const snap = useSnap()
+  const surface = parseSurface(snap.href)
+  if (surface.kind !== 'posts' && surface.kind !== 'reels') return null
+  return <FinderDock username={surface.username} />
+}
+
 function PageTools() {
   const snap = useSnap()
   const surface = parseSurface(snap.href)
@@ -1164,7 +1172,6 @@ function PageTools() {
           )}
         </div>
       )}
-      {(surface.kind === 'posts' || surface.kind === 'reels') && <FinderDock username={surface.username} />}
       {(surface.kind === 'post' || surface.kind === 'stories') && (snap.settings.showDownload || snap.settings.showSave) && (
         <div className="page-tools">
           {snap.settings.showDownload && (
