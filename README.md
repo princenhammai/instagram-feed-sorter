@@ -24,21 +24,18 @@ The release also includes `instagram-feed-sorter-breakdown-v<VERSION>.zip` (an e
 
 Each tool uses the Instagram session already in this browser. None of them like, follow, comment, or message.
 
-### Batch runner
+### Research panel
 
-1. Open Instagram and sign in. Leave that tab open.
-2. Open the extension popup and paste handles, one per line or as profile URLs.
-3. Set Reels per account (up to 200) and the delay between requests (400–10000 ms, default 1200).
-4. Choose **Run batch**. Use **Pause** and **Resume** in the same popup. Resume continues on the account that was in progress.
-5. When it finishes, your downloads folder gets one CSV, one Excel file (Reels, New reels, Summary), and an HTML chart.
+1. Open Instagram and sign in.
+2. Choose **Research** on the page, or **Open research** in the extension popup.
+3. Paste seed handles. Choose **Batch** or **Snowball**. Choose **Run**.
+4. Progress stays in the panel. **Pause** and **Resume** are on that same panel. A reload continues the saved run. Errors stay on the panel.
+5. The results table sorts by × median (the default), engagement, or views. Paid reels are hidden until you check **Show paid**.
+6. **Export** saves an Excel file of the rows you are looking at. **Download top 10** saves those videos. **Sync** sends them to Google Sheets or Notion when that option is already on.
 
-### Snowball research
+Batch loads 100 Reels per account, 1.2 seconds apart. Snowball scores 30 Reels, expands only STRONG accounts, and stops at 20 STRONG accounts, depth 2, or a round under 20% STRONG. Those snowball thresholds are fixed for this pass.
 
-1. Open Instagram and sign in. Leave that tab open.
-2. In the popup, paste 10–20 seed handles under **Snowball research**.
-3. Open **Thresholds and caps** if you want to change Reels scored per account, the delay, the daily cap, the STRONG bar, the target, the depth, or the follower range. Defaults are 30 Reels, 1200 ms, 40 accounts per UTC day, 2 unpaid Reels at 3× a 10,000-view median, 20 STRONG accounts, and depth 2.
-4. Choose **Run snowball**. The tab scores each account, then reads the following list and suggestions only for STRONG accounts.
-5. Pause and Resume live in the same popup. A reload continues from the saved queue. A finished run downloads a CSV and an Excel file (Accounts and Queue). Sheets and Notion run only if you already turned them on.
+The separate Find accounts dock and the popup's threshold form are deferred. Snowball already expands from STRONG accounts, and the fixed defaults above are the research settings.
 
 ### Account finder
 
@@ -85,19 +82,19 @@ The extension is portable across desktop operating systems. GitHub hosting does 
 - Export Google Sheets, Excel, CSV, JSON or clipboard data. CSV, JSON and Excel files are written into the downloads folder, and a failed save is reported instead of a success message.
 - Download the top videos in the current sort as `rank01_<handle>_<shortcode>.mp4` with no save dialog per file. Download other media and keep posts in local folders with the Library.
 - Batch a pasted list of handles into one CSV and one Excel file, with a per-account summary sheet. Optional Google Sheet or Notion sync is off until you turn it on. Find suggested and following accounts from a profile and send them to that batch.
-- Snowball research seeds 10–20 handles, grades each account STRONG, MAYBE, or WEAK from its Reels, and expands only from STRONG accounts. The queue prefers accounts mentioned by more STRONG accounts. It stops at a STRONG target, a max depth, a weak round, or the daily cap, and it resumes after a reload.
+- One research panel on the Instagram page: paste seeds, run a batch or snowball, watch progress, then sort the results by × median, engagement, or views. Paid reels are hidden until you show them. Export, Download top 10, and Sync are one click each. Resume stays on the panel.
 - Optional video transcription using your own Whisper-compatible provider/key.
 - View related accounts suggested by Instagram from the Sorter overlay.
 
 ## Batch runner
 
-The short version is under Quickstart. On an Instagram tab, open the extension popup and paste handles (one per line, or profile URLs). Set how many Reels to load per account (up to 200) and the delay between Instagram requests (400–10000 ms, default 1200). Run batch.
+The short version is under Quickstart. The research panel's Batch mode uses 100 Reels per account and a 1200 ms delay. The same runner still accepts up to 200 Reels when a job is created with that count.
 
 The tab visits each profile's Reels page, reads up to N Reels, and scores that account on its own median. The export is one CSV of every Reel, one Excel workbook, and an HTML summary chart. The workbook has a Reels sheet, a New reels sheet, and a Summary sheet (reels loaded, median views, top Reel, how many Reels are at 3× the account median, and how many were already seen). Each Reel row includes the caption hook: the first line that still says something after hashtags and @mentions are removed. Pause keeps the finished accounts. Resume continues at the same handle. A rate limit, including Instagram's "please wait a few minutes" response, pauses the job instead of advancing. Shortcodes already exported on this browser are marked Seen before and left off the New reels sheet, so a later run does not treat them as new discoveries. The HTML file charts median views and 3× Reels per account.
 
 ## Snowball research
 
-The short version is under Quickstart. Paste 10–20 handles. The crawl scores one account at a time from its Reels (default 30, up to 100), then classifies it:
+The short version is under Quickstart. The panel uses these defaults and does not expose a threshold form. Paste 10–20 handles. The crawl scores one account at a time from its Reels (default 30, up to 100), then classifies it:
 
 - **STRONG** when unpaid Reels at or above 3× that account's median views meet your count (default 2) and the median itself meets your floor (default 10,000). Leave the engagement percent blank to skip that check. A value of `1` requires a median engagement rate of at least 1%.
 - **MAYBE** when the account misses STRONG but still has at least one unpaid 3× Reel and a median of at least 1,000 views.
@@ -113,7 +110,7 @@ The export is a CSV and an Excel workbook with an Accounts sheet and a Queue she
 
 ## Account finder
 
-The short version is under Quickstart. On a profile, use **Find accounts**. It reads Suggested for you, optionally walks a short chain of those suggestions, scrolls an open following dialog, and pages the following list up to the cap you set. The same delay applies between requests. New handles are stored on this browser, deduped, and labeled with a source such as `suggested from ada`. Export the new rows, or send them straight into the batch runner. This does not follow, like, or message anyone.
+Deferred from the on-page UI. Snowball expansion covers the same read. The finder functions are still in the extension, but the Research panel is the path to use. On a profile, the old **Find accounts** dock is no longer shown. It reads Suggested for you, optionally walks a short chain of those suggestions, scrolls an open following dialog, and pages the following list up to the cap you set. The same delay applies between requests. New handles are stored on this browser, deduped, and labeled with a source such as `suggested from ada`. Export the new rows, or send them straight into the batch runner. This does not follow, like, or message anyone.
 
 ## Sheets and Notion
 

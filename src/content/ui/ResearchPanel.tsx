@@ -1,0 +1,199 @@
+import { formatCount, formatMultiple, formatPercent } from '../../lib/format'
+import { TOP_DOWNLOAD, VISIBLE_CAP, type ResearchMode, type ResearchRow, type ResearchSort } from '../../lib/research-table'
+
+export function ResearchPanel({
+  seeds,
+  onSeeds,
+  mode,
+  onMode,
+  running,
+  paused,
+  progress,
+  alert,
+  status,
+  rows,
+  shown,
+  sort,
+  onSort,
+  showPaid,
+  onShowPaid,
+  paidHidden,
+  onRun,
+  onPause,
+  onResume,
+  onExport,
+  onDownload,
+  onSync,
+  busy,
+}: {
+  seeds: string
+  onSeeds: (value: string) => void
+  mode: ResearchMode
+  onMode: (mode: ResearchMode) => void
+  running: boolean
+  paused: boolean
+  progress: string
+  alert: string
+  status: string
+  rows: ResearchRow[]
+  shown: number
+  sort: ResearchSort
+  onSort: (sort: ResearchSort) => void
+  showPaid: boolean
+  onShowPaid: (value: boolean) => void
+  paidHidden: number
+  onRun: () => void
+  onPause: () => void
+  onResume: () => void
+  onExport: () => void
+  onDownload: () => void
+  onSync: () => void
+  busy: '' | 'export' | 'download' | 'sync'
+}) {
+  const visible = rows.slice(0, VISIBLE_CAP)
+  return (
+    <section className="research-panel" aria-label="Research">
+      <header className="research-head">
+        <div>
+          <p className="kicker">Research</p>
+          <h2>Seed, run, review</h2>
+        </div>
+      </header>
+
+      <label className="research-seeds">
+        Seed handles
+        <textarea
+          value={seeds}
+          rows={5}
+          placeholder={'@ada\nhttps://www.instagram.com/bob/'}
+          aria-label="Seed handles, one per line"
+          onChange={(event) => onSeeds(event.target.value)}
+        />
+      </label>
+
+      <div className="segment" role="group" aria-label="Run mode">
+        <button type="button" aria-pressed={mode === 'batch'} onClick={() => onMode('batch')}>
+          Batch
+        </button>
+        <button type="button" aria-pressed={mode === 'snowball'} onClick={() => onMode('snowball')}>
+          Snowball
+        </button>
+      </div>
+      <p className="note">
+        {mode === 'batch'
+          ? 'Loads 100 Reels per account, 1.2s apart. Read-only.'
+          : 'Scores 30 Reels, expands only STRONG accounts, and stops at 20 STRONG, depth 2, or a weak round.'}
+      </p>
+
+      <div className="row">
+        {running ? (
+          <button type="button" onClick={onPause}>
+            Pause
+          </button>
+        ) : (
+          <button type="button" className="primary" onClick={onRun}>
+            Run
+          </button>
+        )}
+        {paused && (
+          <button type="button" className="primary" onClick={onResume}>
+            Resume
+          </button>
+        )}
+      </div>
+
+      {progress && (
+        <p className="research-progress" role="status">
+          {progress}
+        </p>
+      )}
+      {alert && (
+        <p className="research-error" role="alert">
+          {alert}
+        </p>
+      )}
+      {status && !alert && <p className="research-ok">{status}</p>}
+
+      <div className="research-results">
+        <div className="spread">
+          <p className="note">
+            {rows.length === 0 ? 'No reels yet.' : `${rows.length} reels`}
+            {shown < rows.length ? ` · showing ${shown}` : ''}
+            {paidHidden > 0 ? ` · ${paidHidden} paid hidden` : ''}
+          </p>
+          <label className="check">
+            <input type="checkbox" checked={showPaid} onChange={(event) => onShowPaid(event.target.checked)} />
+            Show paid
+          </label>
+        </div>
+        <div className="research-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th>Hook</th>
+                <SortHeader label="Views" column="views" sort={sort} onSort={onSort} />
+                <SortHeader label="× median" column="median" sort={sort} onSort={onSort} />
+                <SortHeader label="Engagement" column="engagement" sort={sort} onSort={onSort} />
+              </tr>
+            </thead>
+            <tbody>
+              {visible.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="empty">
+                    Run a batch or snowball. Paid reels stay hidden until you show them.
+                  </td>
+                </tr>
+              )}
+              {visible.map((row) => (
+                <tr key={`${row.username}-${row.shortcode}`}>
+                  <td>@{row.username}</td>
+                  <td className="hook" title={row.hook}>
+                    {row.hook || '—'}
+                    {row.likelyPaid ? <span className="paid">Paid</span> : null}
+                  </td>
+                  <td>{formatCount(row.views)}</td>
+                  <td>{row.medianScore == null ? '—' : formatMultiple(row.medianScore)}</td>
+                  <td>{formatPercent(row.engagementRate)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="research-actions">
+        <button type="button" className="primary" disabled={busy !== '' || rows.length === 0} onClick={onExport}>
+          {busy === 'export' ? 'Exporting…' : 'Export'}
+        </button>
+        <button type="button" disabled={busy !== '' || rows.length === 0} onClick={onDownload}>
+          {busy === 'download' ? 'Downloading…' : `Download top ${Math.min(TOP_DOWNLOAD, rows.length || TOP_DOWNLOAD)}`}
+        </button>
+        <button type="button" disabled={busy !== '' || rows.length === 0} onClick={onSync}>
+          {busy === 'sync' ? 'Syncing…' : 'Sync'}
+        </button>
+      </div>
+    </section>
+  )
+}
+
+function SortHeader({
+  label,
+  column,
+  sort,
+  onSort,
+}: {
+  label: string
+  column: ResearchSort
+  sort: ResearchSort
+  onSort: (sort: ResearchSort) => void
+}) {
+  const active = sort === column
+  return (
+    <th aria-sort={active ? 'descending' : 'none'}>
+      <button type="button" className={active ? 'sort-on' : ''} onClick={() => onSort(column)}>
+        {label}
+      </button>
+    </th>
+  )
+}

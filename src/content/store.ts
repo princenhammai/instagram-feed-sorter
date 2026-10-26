@@ -46,6 +46,7 @@ export interface Snap {
   notice: string | null
   settings: Settings
   batch: BatchProgress | null
+  researchOpen: boolean
 }
 
 export const CLOSED_SIMILAR: SimilarState = { open: false, loading: false, accounts: [], error: null }
@@ -58,6 +59,7 @@ let snap: Snap = {
   notice: null,
   settings: DEFAULT_SETTINGS,
   batch: null,
+  researchOpen: false,
 }
 
 const listeners = new Set<() => void>()

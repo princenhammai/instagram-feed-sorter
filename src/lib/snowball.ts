@@ -1,4 +1,4 @@
-import { clampDelay } from './batch'
+import { clampDelay, compactReel, type StoredReel } from './batch'
 import { tableToCsv } from './export'
 import { withEngagement } from './outlier'
 import { median, withResearch } from './research'
@@ -68,6 +68,7 @@ export interface ScoredAccount {
   loaded: number
   provenance: string
   sources: SourceRef[]
+  reels: StoredReel[]
   error?: string
 }
 
@@ -86,6 +87,7 @@ export interface SnowballJob {
   seen: string[]
   expanded: string[]
   accounts: ScoredAccount[]
+  seeds: string[]
   updatedAt: number
 }
 
@@ -208,6 +210,7 @@ export function createSnowball(seeds: string[], input: Partial<SnowballSettings>
     seen,
     expanded: [],
     accounts: [],
+    seeds: queue.map((item) => item.username),
     updatedAt: now,
   }
 }
@@ -340,6 +343,7 @@ export function applyScore(job: SnowballJob, input: ScoreInput, now = Date.now()
     loaded: metrics.loaded,
     provenance: provenanceText(queued?.sources ?? []),
     sources: queued?.sources ?? [],
+    reels: input.error ? [] : input.posts.map((post) => compactReel(post)),
     error: input.error,
   }
   return {

@@ -14,7 +14,7 @@ Download **instagram-feed-sorter-breakdown-v0.4.1.zip**. It contains `breakdown.
 
 ## Quickstart
 
-- **Snowball research.** Popup → paste 10–20 handles → Run snowball. It scores Reels, marks STRONG / MAYBE / WEAK, and expands only STRONG accounts. Pause, Resume, and a reload keep the queue. The download is a CSV and an Excel file with provenance such as `followed by A, B`.
+- **Research panel.** On an Instagram tab, choose Research. Paste handles, run Batch or Snowball, and read progress in the same panel. The results table sorts by × median, engagement, or views, and hides paid reels until you show them. Export, Download top 10, and Sync are one click. Resume stays on the panel.
 - **Batch runner.** Popup → paste handles → set the Reel count and delay → Run batch. Pause and Resume stay in the popup. The download is one CSV, one Excel workbook, and an HTML chart.
 - **Account finder.** On a profile, Find accounts. Export the new handles or send them into the batch.
 - **Sheets and Notion.** Options page. Both stay off until you enable them. Notion uses a token stored only in this browser.

@@ -1072,6 +1072,11 @@ export function onMessage(
       .catch((error: unknown) => sendResponse({ ok: false, error: humanError(error) }))
     return true
   }
+  if (message?.type === 'SHOW_RESEARCH') {
+    patch({ researchOpen: true })
+    sendResponse({ ok: true })
+    return false
+  }
   if (message?.type === 'PAUSE_SNOWBALL') {
     void markSnowballPaused('Paused.').then(() => {
       collectAbort?.abort()

@@ -1,0 +1,383 @@
+import { useEffect, useMemo, useState } from 'react'
+import { ResearchPanel } from './ResearchPanel'
+import { kickBatch, loadJob, markPaused, markResumed, queueBatch, resumeBatch } from '../batch-run'
+import { downloadRanked, stopCollect } from '../controller'
+import { markSnowballPaused, markSnowballResumed, resumeSnowballRun } from '../snowball-run'
+import { useSnap } from '../store'
+import {
+  BATCH_KEY,
+  BATCH_PROGRESS_KEY,
+  DEFAULT_DELAY_MS,
+  DEFAULT_REELS,
+  batchSummaryTable,
+  parseHandles,
+  reelsUrl,
+  type BatchJob,
+  type BatchProgress,
+} from '../../lib/batch'
+import { tableToCsv } from '../../lib/export'
+import { downloadName, safeSegment } from '../../lib/media-files'
+import {
+  RESEARCH_OPEN_KEY,
+  TOP_DOWNLOAD,
+  VISIBLE_CAP,
+  orderResearchRows,
+  researchReelTable,
+  researchRows,
+  researchSummaries,
+  type ResearchMode,
+  type ResearchSort,
+} from '../../lib/research-table'
+import {
+  DEFAULT_SNOWBALL_REELS,
+  SNOWBALL_KEY,
+  SNOWBALL_PROGRESS_KEY,
+  createSnowball,
+  isSnowballJob,
+  plan,
+  progressLabel,
+  type SnowballJob,
+} from '../../lib/snowball'
+import { SYNC_KEY, cleanSync, notionReady, type SummarySyncRow, type SyncSettings } from '../../lib/sync'
+import { buildWorkbook } from '../../lib/xlsx'
+
+function problemNote(note: string | undefined, status: string | undefined): string {
+  if (!note || status === 'done' || note === 'Paused.') return ''
+  if (/rate limit|429|please wait|daily cap|could not|didn't|private|error/i.test(note)) return note
+  return ''
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
+  }
+  return btoa(binary)
+}
+
+export function ResearchDock() {
+  const snap = useSnap()
+  const [open, setOpen] = useState(false)
+  const [seeds, setSeeds] = useState('')
+  const [edited, setEdited] = useState(false)
+  const [mode, setMode] = useState<ResearchMode>('batch')
+  const [batchJob, setBatchJob] = useState<BatchJob | null>(null)
+  const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null)
+  const [snowJob, setSnowJob] = useState<SnowballJob | null>(null)
+  const [snowProgress, setSnowProgress] = useState('')
+  const [sort, setSort] = useState<ResearchSort>('median')
+  const [showPaid, setShowPaid] = useState(false)
+  const [alert, setAlert] = useState('')
+  const [status, setStatus] = useState('')
+  const [busy, setBusy] = useState<'' | 'export' | 'download' | 'sync'>('')
+
+  useEffect(() => {
+    const load = async () => {
+      const stored = await chrome.storage.local.get([BATCH_PROGRESS_KEY, SNOWBALL_KEY, SNOWBALL_PROGRESS_KEY, RESEARCH_OPEN_KEY])
+      const batch = await loadJob()
+      const snow = isSnowballJob(stored[SNOWBALL_KEY]) ? stored[SNOWBALL_KEY] : null
+      setBatchJob(batch)
+      setBatchProgress((stored[BATCH_PROGRESS_KEY] as BatchProgress | undefined) ?? null)
+      setSnowJob(snow)
+      setSnowProgress(typeof stored[SNOWBALL_PROGRESS_KEY] === 'string' ? stored[SNOWBALL_PROGRESS_KEY] : '')
+      if (stored[RESEARCH_OPEN_KEY] || snap.researchOpen || batch?.status === 'running' || snow?.status === 'running') {
+        setOpen(true)
+        if (stored[RESEARCH_OPEN_KEY]) await chrome.storage.local.remove(RESEARCH_OPEN_KEY)
+      }
+    }
+    void load()
+    const onChanged = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area !== 'local') return
+      if (changes[BATCH_KEY]) void loadJob().then(setBatchJob)
+      if (changes[BATCH_PROGRESS_KEY]) setBatchProgress((changes[BATCH_PROGRESS_KEY].newValue as BatchProgress | undefined) ?? null)
+      if (changes[SNOWBALL_KEY]) setSnowJob(isSnowballJob(changes[SNOWBALL_KEY].newValue) ? changes[SNOWBALL_KEY].newValue as SnowballJob : null)
+      if (changes[SNOWBALL_PROGRESS_KEY]) setSnowProgress(typeof changes[SNOWBALL_PROGRESS_KEY].newValue === 'string' ? changes[SNOWBALL_PROGRESS_KEY].newValue : '')
+      if (changes[RESEARCH_OPEN_KEY]?.newValue) setOpen(true)
+    }
+    chrome.storage.onChanged.addListener(onChanged)
+    return () => chrome.storage.onChanged.removeListener(onChanged)
+  }, [snap.researchOpen])
+
+  useEffect(() => {
+    if (snap.researchOpen) setOpen(true)
+  }, [snap.researchOpen])
+
+  useEffect(() => {
+    if (edited) return
+    const next = mode === 'batch' ? batchJob?.handles.join('\n') : snowJob?.seeds?.join('\n')
+    if (next) setSeeds(next)
+  }, [mode, batchJob, snowJob, edited])
+
+  const activeJob = mode === 'batch' ? batchJob : snowJob
+  const running = activeJob?.status === 'running'
+  const paused = activeJob?.status === 'paused'
+  const groups = useMemo(() => {
+    if (mode === 'batch' && batchJob) {
+      return batchJob.accounts.filter((account) => account.reels.length > 0).map((account) => ({
+        username: account.username,
+        followers: account.followers,
+        reels: account.reels,
+      }))
+    }
+    if (snowJob) {
+      return snowJob.accounts
+        .filter((account) => (account.reels?.length ?? 0) > 0)
+        .map((account) => ({ username: account.username, followers: account.followers, reels: account.reels ?? [] }))
+    }
+    return []
+  }, [mode, batchJob, snowJob])
+  const allRows = useMemo(() => researchRows(groups), [groups])
+  const rows = useMemo(() => orderResearchRows(allRows, sort, !showPaid), [allRows, sort, showPaid])
+  const paidHidden = showPaid ? 0 : allRows.filter((row) => row.likelyPaid).length
+  const jobAlert = problemNote(activeJob?.note, activeJob?.status)
+  const progress = progressFor(mode, batchJob, batchProgress, snowJob, snowProgress, snap.phase.type === 'collecting' ? snap.phase.label : '')
+
+  async function run() {
+    setAlert('')
+    setStatus('')
+    const handles = parseHandles(seeds)
+    if (handles.length === 0) {
+      setAlert('Paste at least one Instagram handle.')
+      return
+    }
+    if (mode === 'batch') {
+      if (snowJob?.status === 'running') {
+        setAlert('Pause the snowball before running a batch.')
+        return
+      }
+      const url = await queueBatch(handles, DEFAULT_REELS, DEFAULT_DELAY_MS)
+      const here = location.pathname.replace(/\/+$/, '')
+      if (here.toLowerCase() === `/${handles[0]}/reels`.toLowerCase()) kickBatch()
+      else location.assign(url)
+      return
+    }
+    if (batchJob?.status === 'running') {
+      setAlert('Pause the batch before running a snowball.')
+      return
+    }
+    const picked = handles.slice(0, 20)
+    const job = createSnowball(picked, { reelsPerAccount: DEFAULT_SNOWBALL_REELS, delayMs: DEFAULT_DELAY_MS })
+    await chrome.storage.local.set({ [SNOWBALL_KEY]: job, [SNOWBALL_PROGRESS_KEY]: progressLabel(job) })
+    if (picked.length < handles.length) setStatus('Using the first 20 handles.')
+    const surface = location.pathname.toLowerCase()
+    if (surface.includes(`/${picked[0]?.toLowerCase()}/reels`)) void resumeSnowballRun()
+    else location.assign(reelsUrl(picked[0]))
+  }
+
+  async function pause() {
+    setAlert('')
+    if (batchJob?.status === 'running') await markPaused('Paused.')
+    if (snowJob?.status === 'running') await markSnowballPaused('Paused.')
+    stopCollect()
+  }
+
+  async function resume() {
+    setAlert('')
+    setStatus('')
+    if (mode === 'snowball') {
+      const job = await markSnowballResumed()
+      if (!job || job.status === 'done') {
+        setAlert('No paused snowball to resume.')
+        return
+      }
+      const planned = plan(job)
+      const next = planned.step.type === 'score' ? planned.step.username : undefined
+      if (next && !location.pathname.toLowerCase().includes(`/${next.toLowerCase()}/reels`)) {
+        location.assign(reelsUrl(next))
+        return
+      }
+      void resumeSnowballRun()
+      return
+    }
+    const job = await markResumed()
+    if (!job || job.status === 'done') {
+      setAlert('No paused batch to resume.')
+      return
+    }
+    const handle = job.handles[job.index]
+    if (handle && !location.pathname.toLowerCase().includes(`/${handle.toLowerCase()}/reels`)) {
+      location.assign(reelsUrl(handle))
+      return
+    }
+    void resumeBatch()
+  }
+
+  async function exportRows() {
+    if (rows.length === 0) {
+      setAlert('No reels to export. Paid reels are hidden until you show them.')
+      return
+    }
+    setBusy('export')
+    setAlert('')
+    try {
+      const stamp = new Date().toISOString().slice(0, 10)
+      const bytes = new Uint8Array(
+        await buildWorkbook([
+          { name: 'Reels', rows: researchReelTable(rows) },
+          { name: 'Accounts', rows: batchSummaryTable(researchSummaries(rows)) },
+        ]),
+      )
+      const response = (await chrome.runtime.sendMessage({
+        type: 'DOWNLOAD_BYTES',
+        filename: downloadName(`${safeSegment(`research-${stamp}`)}.xlsx`),
+        mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        base64: bytesToBase64(bytes),
+      })) as { ok?: boolean; error?: string } | undefined
+      if (!response?.ok) setAlert(response?.error || 'Chrome did not save the export.')
+      else setStatus(`Exported ${rows.length} reels.`)
+    } catch (error) {
+      setAlert(error instanceof Error ? error.message : 'Could not export.')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function downloadTop() {
+    const posts = rows.slice(0, TOP_DOWNLOAD).map((row) => row.post)
+    if (posts.length === 0) {
+      setAlert('No reels to download. Paid reels are hidden until you show them.')
+      return
+    }
+    setBusy('download')
+    setAlert('')
+    setStatus('')
+    try {
+      await downloadRanked({ kind: 'reels', username: 'research' }, posts)
+      setStatus(`Queued the top ${posts.length} videos.`)
+    } catch (error) {
+      setAlert(error instanceof Error ? error.message : 'Could not download those videos.')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function syncRows() {
+    if (rows.length === 0) {
+      setAlert('No reels to sync. Paid reels are hidden until you show them.')
+      return
+    }
+    setBusy('sync')
+    setAlert('')
+    setStatus('')
+    try {
+      const stored = await chrome.storage.local.get(SYNC_KEY)
+      const sync = cleanSync(stored[SYNC_KEY] as Partial<SyncSettings> | undefined)
+      if (!sync.sheets && !notionReady(sync)) {
+        setAlert('Turn on Google Sheets or Notion in the extension options, then sync again.')
+        return
+      }
+      const summaries = researchSummaries(rows)
+      const notes: string[] = []
+      if (sync.sheets) {
+        const sheet = (await chrome.runtime.sendMessage({
+          type: 'CREATE_SHEET',
+          title: `Research ${new Date().toISOString().slice(0, 10)}`,
+          csv: tableToCsv(researchReelTable(rows)),
+        })) as { ok?: boolean; error?: string } | undefined
+        notes.push(sheet?.ok ? 'Opened a Google Sheet.' : `Sheets: ${sheet?.error || 'could not create the sheet.'}`)
+      }
+      if (notionReady(sync)) {
+        const payload: SummarySyncRow[] = summaries.map((summary) => {
+          const account = snowJob?.accounts.find((item) => item.username.toLowerCase() === summary.username.toLowerCase())
+          return {
+            account: summary.username,
+            loaded: summary.loaded,
+            medianViews: summary.medianViews,
+            topReel: summary.topPermalink,
+            topViews: summary.topViews,
+            atLeast3x: summary.atLeast3x,
+            followers: summary.followers,
+            grade: account?.grade,
+            note: account?.provenance,
+          }
+        })
+        const notion = (await chrome.runtime.sendMessage({
+          type: 'NOTION_SYNC',
+          rows: payload,
+          delayMs: DEFAULT_DELAY_MS,
+        })) as { ok?: boolean; error?: string } | undefined
+        notes.push(notion?.ok ? 'Sent the summary to Notion.' : `Notion: ${notion?.error || 'could not add the rows.'}`)
+      }
+      const failed = notes.filter((note) => note.startsWith('Sheets:') || note.startsWith('Notion:'))
+      if (failed.length > 0) setAlert(notes.join(' '))
+      else setStatus(notes.join(' '))
+    } catch (error) {
+      setAlert(error instanceof Error ? error.message : 'Could not sync.')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  if (!open) {
+    return (
+      <div className="research">
+        <button type="button" className="primary" onClick={() => setOpen(true)}>
+          Research{running ? ' · running' : paused ? ' · paused' : ''}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="research open">
+      <div className="research-wrap">
+        <button
+          type="button"
+          className="ghost research-close"
+          onClick={() => {
+            setOpen(false)
+          }}
+        >
+          Close
+        </button>
+        <ResearchPanel
+          seeds={seeds}
+          onSeeds={(value) => {
+            setEdited(true)
+            setSeeds(value)
+          }}
+          mode={mode}
+          onMode={setMode}
+          running={Boolean(running)}
+          paused={Boolean(paused)}
+          progress={progress}
+          alert={alert || jobAlert}
+          status={status}
+          rows={rows}
+          shown={Math.min(rows.length, VISIBLE_CAP)}
+          sort={sort}
+          onSort={setSort}
+          showPaid={showPaid}
+          onShowPaid={setShowPaid}
+          paidHidden={paidHidden}
+          onRun={() => void run()}
+          onPause={() => void pause()}
+          onResume={() => void resume()}
+          onExport={() => void exportRows()}
+          onDownload={() => void downloadTop()}
+          onSync={() => void syncRows()}
+          busy={busy}
+        />
+      </div>
+    </div>
+  )
+}
+
+function progressFor(
+  mode: ResearchMode,
+  batchJob: BatchJob | null,
+  batchProgress: BatchProgress | null,
+  snowJob: SnowballJob | null,
+  snowProgress: string,
+  live: string,
+): string {
+  if (mode === 'batch') {
+    if (!batchJob) return live
+    const place = batchProgress && batchJob.status === 'running'
+      ? `${batchProgress.index}/${batchProgress.total} @${batchProgress.handle} · ${batchProgress.collected} reels`
+      : `${batchJob.index}/${batchJob.handles.length}`
+    return [live, `Batch ${batchJob.status} · ${place}`].filter(Boolean).join(' · ')
+  }
+  if (!snowJob) return live
+  return [live, `Snowball ${snowJob.status} · ${snowProgress || progressLabel(snowJob)}`].filter(Boolean).join(' · ')
+}
