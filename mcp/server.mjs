@@ -7,7 +7,7 @@ import { z } from 'zod'
 
 const PORT = 47331
 const HOST = '127.0.0.1'
-const VERSION = '0.4.4'
+const VERSION = '0.4.5'
 
 const INSTRUCTIONS = `Instagram research through the user's own Chrome window.
 Instagram Feed Sorter must be loaded, and Chrome must be open and signed in to Instagram.
@@ -358,7 +358,7 @@ async function main() {
     const response = await fetch(`http://${HOST}:${PORT}/health`, { signal: AbortSignal.timeout(3000) })
     const health = await response.json()
     if (health.name !== 'feed-sorter' || health.version !== VERSION) {
-      throw new Error('Port 47331 is occupied by another or older bridge. Restart the existing Feed Sorter MCP process before using version 0.4.4.')
+      throw new Error('Port 47331 is occupied by another or older bridge. Restart the existing Feed Sorter MCP process before using version 0.4.5.')
     }
     console.error('Feed Sorter agent bridge is already running. This process will forward to it.')
   }

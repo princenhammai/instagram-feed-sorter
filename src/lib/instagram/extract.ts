@@ -197,6 +197,31 @@ function takeList(list: unknown, into: SimilarAccount[], seen: Set<string>): voi
   }
 }
 
+function isChromeUserKey(key: string): boolean {
+  return isRelatedKey(key) || /suggest|following|follower|friendship|sidebar/i.test(key)
+}
+
+/** Accounts from a search payload, skipping suggested, following, and chaining lists. */
+export function extractSearchUsers(data: unknown): SimilarAccount[] {
+  if (!data || typeof data !== 'object') return []
+  const accounts: SimilarAccount[] = []
+  const seen = new Set<string>()
+  const walk = (node: unknown, depth: number) => {
+    if (!node || typeof node !== 'object' || depth > 16) return
+    if (Array.isArray(node)) {
+      if (node.some((item) => asAccount(item))) takeList(node, accounts, seen)
+      for (const item of node) walk(item, depth + 1)
+      return
+    }
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if (isChromeUserKey(key)) continue
+      walk(value, depth + 1)
+    }
+  }
+  walk(data, 0)
+  return accounts.slice(0, 40)
+}
+
 export function extractUsers(data: unknown, loose = true): SimilarAccount[] {
   if (!data || typeof data !== 'object') return []
   const accounts: SimilarAccount[] = []

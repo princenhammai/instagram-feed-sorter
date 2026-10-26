@@ -507,6 +507,19 @@ export function markExpanded(job: SnowballJob, username: string, now = Date.now(
   return { ...job, expanded: [...job.expanded, key], updatedAt: now }
 }
 
+export function keywordAccountHandles(job: SnowballJob): string[] {
+  const names: string[] = []
+  const seen = new Set<string>()
+  for (const item of job.queue) {
+    if (!item.sources.some((source) => source.via === 'search')) continue
+    const key = item.username.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    names.push(item.username.replace(/^@/, ''))
+  }
+  return names
+}
+
 export function progressLabel(job: SnowballJob): string {
   const keywords = job.keywords ?? []
   const searched = job.searched ?? []

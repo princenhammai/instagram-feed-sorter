@@ -5,6 +5,7 @@ import {
   applyScore,
   applySearchCandidates,
   createSnowball,
+  keywordAccountHandles,
   markExpanded,
   parseKeywords,
   pauseSnowball,
@@ -270,6 +271,7 @@ describe('snowball graph', () => {
     const capped = applySearchCandidates(createSnowball([], { searchCap: 3 }, DAY, ['barber']), 'barber', hits, DAY)
     expect(capped.queue.map((item) => item.username)).toEqual(['shop0', 'shop1', 'shop2'])
     expect(capped.searched).toEqual(['barber'])
+    expect(keywordAccountHandles(capped)).toEqual(['shop0', 'shop1', 'shop2'])
     const partial = applySearchCandidates(createSnowball([], {}, DAY, ['barber']), 'barber', hits.slice(0, 2), DAY, false)
     expect(partial.searched).toEqual([])
     expect(plan(partial, DAY).step).toEqual({ type: 'search', keyword: 'barber' })

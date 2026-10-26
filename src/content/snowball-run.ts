@@ -6,7 +6,8 @@ import { notify, patch } from './store'
 import { isRateLimited, reelsUrl } from '../lib/batch'
 import { humanError } from '../lib/format'
 import { downloadName, safeSegment } from '../lib/media-files'
-import { isKeywordSearchPage, keywordSearchUrl } from '../lib/page-accounts'
+import { isKeywordSearchPage, keywordSearchUrl, searchCaptureNote } from '../lib/page-accounts'
+import { allowProgressPaint, gridCaptureSnippet } from '../lib/sort-capture'
 import { parseSurface } from '../lib/surface'
 import { SYNC_KEY, cleanSync, notionReady, type SummarySyncRow, type SyncSettings } from '../lib/sync'
 import {
@@ -203,15 +204,19 @@ async function runOnce(): Promise<void> {
     if (!(await pause(planned.job.settings.delayMs, signal))) return
     const latest = await loadSnowball()
     if (!latest || latest.status !== 'running') return
+    const searchGate = { count: -1, at: 0 }
     const found = await readKeyword(latest.settings.searchCap ?? 15, signal, (collected) => {
+      if (!allowProgressPaint(searchGate, collected, Date.now())) return
       patch({
         phase: { type: 'collecting', collected, label: `Searching “${keyword}”`, percent: null, scrolling: true },
       })
     })
+    const names = found.hits.map((hit) => hit.username)
+    const noted = searchCaptureNote(keyword, names)
     recordTrace({
       url: location.href,
-      status: found.hits.length > 0 ? 200 : 0,
-      snippet: found.hits.length > 0 ? `${found.hits.length} accounts read from the search page` : 'The search page did not list any accounts.',
+      status: noted.status,
+      snippet: noted.snippet,
     })
     if (found.aborted || signal.aborted) {
       await saveSnowball(pauseSnowball(latest, 'Paused.'))
@@ -220,9 +225,8 @@ async function runOnce(): Promise<void> {
     }
     sessionStorage.removeItem(KEYWORD_HOP)
     const next = applySearchCandidates(latest, keyword, found.hits)
-    const missed = found.hits.length === 0 ? `No accounts for “${keyword}”. The search page did not list any accounts.` : undefined
-    await saveSnowball({ ...next, searchNote: missed })
-    if (missed) notify(missed)
+    await saveSnowball({ ...next, searchNote: noted.note })
+    if (found.hits.length === 0) notify(noted.note)
     snowballAgain = true
     return
   }
@@ -249,7 +253,13 @@ async function runOnce(): Promise<void> {
     const latest = await loadSnowball()
     if (!latest || latest.status !== 'running') return
     if (signal.aborted) return
-    const showCollecting = (collected: number) => {
+    const paintGate = { count: -1, at: 0 }
+    const showCollecting = (collected: number, force = false) => {
+      if (force) {
+        if (paintGate.at !== 0 && paintGate.count === collected) return
+        paintGate.count = collected
+        paintGate.at = Date.now()
+      } else if (!allowProgressPaint(paintGate, collected, Date.now())) return
       patch({
         phase: {
           type: 'collecting',
@@ -262,11 +272,14 @@ async function runOnce(): Promise<void> {
     }
     let followers: number | null = null
     try {
-      const posts = await collectGridReels(username, latest.settings.reelsPerAccount, signal, (collected) => showCollecting(collected))
+      const captured = await collectGridReels(username, latest.settings.reelsPerAccount, signal, (collected) => showCollecting(collected))
+      const posts = captured.posts
+      showCollecting(posts.length, true)
+      const trace = gridCaptureSnippet(posts.length, captured.timedOut)
       recordTrace({
         url: location.href,
-        status: posts.length > 0 ? 200 : 0,
-        snippet: posts.length > 0 ? `${posts.length} reels read from the page grid` : 'The page grid did not load any reels.',
+        status: trace.status,
+        snippet: trace.snippet,
       })
       try {
         followers = await followerCount(username)
@@ -279,7 +292,7 @@ async function runOnce(): Promise<void> {
         notify('Snowball paused. Resume it from the research panel.')
         return
       }
-      const error = posts.length === 0 ? 'No reels came back from this profile grid.' : undefined
+      const error = posts.length === 0 ? trace.snippet : undefined
       await saveSnowball(applyScore(latest, { username, followers, posts, error }, Date.now()))
       snowballAgain = true
     } catch (error) {

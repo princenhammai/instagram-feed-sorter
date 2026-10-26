@@ -1,7 +1,15 @@
 import { callMain } from './bridge'
-import { nudgeFeed } from './capture-reels'
-import { GRID_IDLE_ROUNDS, nextIdle } from '../lib/grid-reels'
-import { accountsFromHrefs, mergeSearchAccounts, usernameFromPath, type PageAccount } from '../lib/page-accounts'
+import { nudgeSortGrid } from './capture-reels'
+import {
+  accountsFromHrefs,
+  accountsFromSearchHits,
+  usernameFromPath,
+  visibleSearchAccounts,
+  type PageAccount,
+} from '../lib/page-accounts'
+
+const SEARCH_IDLE_ROUNDS = 3
+const SEARCH_DEADLINE_MS = 15_000
 
 function pause(ms: number, signal: AbortSignal): Promise<boolean> {
   return new Promise((resolve) => {
@@ -21,11 +29,23 @@ function pause(ms: number, signal: AbortSignal): Promise<boolean> {
   })
 }
 
-function resultAnchors(): HTMLAnchorElement[] {
+function inChrome(node: Element): boolean {
+  if (node.closest('nav, header, aside, [role="navigation"], [role="complementary"]')) return true
+  let current: Element | null = node
+  while (current && current !== document.body) {
+    const label = (current.getAttribute('aria-label') || '').toLowerCase()
+    if (/\bsuggest|\bfollowing\b/.test(label)) return true
+    current = current.parentElement
+  }
+  return false
+}
+
+function classifyAnchors(): { resultHrefs: string[]; chromeHrefs: string[] } {
+  const resultHrefs: string[] = []
+  const chromeHrefs: string[] = []
   const root = document.querySelector('main') || document.body
-  const found: HTMLAnchorElement[] = []
-  for (const node of root.querySelectorAll('a[href]')) {
-    if (!(node instanceof HTMLAnchorElement) || node.closest('nav, header')) continue
+  for (const node of document.querySelectorAll('a[href]')) {
+    if (!(node instanceof HTMLAnchorElement)) continue
     let pathname = ''
     try {
       pathname = new URL(node.href, location.href).pathname
@@ -33,17 +53,14 @@ function resultAnchors(): HTMLAnchorElement[] {
       continue
     }
     if (!usernameFromPath(pathname)) continue
-    found.push(node)
+    if (inChrome(node) || !root.contains(node)) chromeHrefs.push(node.href)
+    else resultHrefs.push(node.href)
   }
-  return found
+  return { resultHrefs, chromeHrefs }
 }
 
-function domUsernames(): string[] {
-  return accountsFromHrefs(resultAnchors().map((anchor) => anchor.href))
-}
-
-async function capturedAccounts(): Promise<PageAccount[]> {
-  const raw = await callMain({ action: 'captured-accounts' })
+async function queryHits(): Promise<PageAccount[]> {
+  const raw = await callMain({ action: 'search-hits' })
   if (!Array.isArray(raw)) return []
   return raw.flatMap((item) => {
     if (!item || typeof item !== 'object') return []
@@ -59,34 +76,26 @@ export async function collectSearchAccounts(
   signal: AbortSignal,
   onProgress?: (count: number) => void,
 ): Promise<PageAccount[]> {
-  if (!(await pause(800, signal))) return []
-  let hits = mergeSearchAccounts(await capturedAccounts(), domUsernames(), cap)
-  onProgress?.(hits.length)
+  if (!(await pause(700, signal))) return []
+  let best: PageAccount[] = []
+  let last = -1
   let idle = 0
-  let last = hits.length
-  const deadline = Date.now() + 8000
-  while (hits.length === 0 && Date.now() < deadline && !signal.aborted) {
-    if (!(await pause(300, signal))) return hits
-    hits = mergeSearchAccounts(await capturedAccounts(), domUsernames(), cap)
-    onProgress?.(hits.length)
-  }
-  while (hits.length < cap && idle < GRID_IDLE_ROUNDS && !signal.aborted) {
-    nudgeFeed(idle, resultAnchors())
-    const grownAt = Date.now() + 2800
-    let grew = false
-    while (Date.now() < grownAt && !signal.aborted) {
-      if (!(await pause(400, signal))) break
-      hits = mergeSearchAccounts(await capturedAccounts(), domUsernames(), cap)
-      onProgress?.(hits.length)
-      if (hits.length > last) {
-        grew = true
-        break
-      }
-    }
-    if (hits.length >= cap || signal.aborted) break
-    idle = grew ? 0 : nextIdle(last, hits.length, idle)
-    last = hits.length
+  const deadline = Date.now() + SEARCH_DEADLINE_MS
+  for (;;) {
+    if (signal.aborted || Date.now() >= deadline) break
+    const { resultHrefs, chromeHrefs } = classifyAnchors()
+    const dom = visibleSearchAccounts(resultHrefs, chromeHrefs, cap)
+    const hits = accountsFromSearchHits(dom, await queryHits(), accountsFromHrefs(chromeHrefs), cap)
+    if (hits.length > best.length) best = hits
+    onProgress?.(best.length)
+    if (best.length >= cap) break
+    const grew = hits.length > last
+    idle = grew ? 0 : idle + 1
+    last = Math.max(last, hits.length)
+    if (idle >= SEARCH_IDLE_ROUNDS) break
+    nudgeSortGrid(idle)
+    if (!(await pause(idle === 0 ? 700 : 1000, signal))) break
   }
   window.scrollTo(0, 0)
-  return hits
+  return best
 }

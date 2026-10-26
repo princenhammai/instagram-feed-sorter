@@ -1,6 +1,7 @@
 import { followerCount } from './api'
 import { collectGridReels } from './capture-reels'
 import { recordTrace } from './request-log'
+import { allowProgressPaint, gridCaptureSnippet } from '../lib/sort-capture'
 import { getSnap, notify, patch, type BatchProgress } from './store'
 import {
   BATCH_KEY,
@@ -220,7 +221,13 @@ async function runOnce(): Promise<void> {
   const known = seenKeySet(await loadSeen())
   if (signal.aborted) return
 
-  const showCollecting = (collected: number) => {
+  const paintGate = { count: -1, at: 0 }
+  const showCollecting = (collected: number, force = false) => {
+    if (force) {
+      if (paintGate.at !== 0 && paintGate.count === collected) return
+      paintGate.count = collected
+      paintGate.at = Date.now()
+    } else if (!allowProgressPaint(paintGate, collected, Date.now())) return
     const progress = progressLabel(latest, collected)
     patch({
       phase: {
@@ -236,12 +243,11 @@ async function runOnce(): Promise<void> {
 
   let followers: number | null = null
   try {
-    const posts = await collectGridReels(handle, latest.reelsPerAccount, signal, (collected) => showCollecting(collected))
-    recordTrace({
-      url: location.href,
-      status: posts.length > 0 ? 200 : 0,
-      snippet: posts.length > 0 ? `${posts.length} reels read from the page grid` : 'The page grid did not load any reels.',
-    })
+    const captured = await collectGridReels(handle, latest.reelsPerAccount, signal, (collected) => showCollecting(collected))
+    const posts = captured.posts
+    showCollecting(posts.length, true)
+    const trace = gridCaptureSnippet(posts.length, captured.timedOut)
+    recordTrace({ url: location.href, status: trace.status, snippet: trace.snippet })
     try {
       followers = await followerCount(handle)
     } catch {
@@ -255,7 +261,7 @@ async function runOnce(): Promise<void> {
         {
           followers,
           posts,
-          thrown: posts.length === 0 && !signal.aborted ? 'No reels came back from this profile grid.' : '',
+          thrown: posts.length === 0 && !signal.aborted ? trace.snippet : '',
           aborted: signal.aborted,
         },
         known,

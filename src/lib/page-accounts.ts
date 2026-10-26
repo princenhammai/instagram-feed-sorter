@@ -49,6 +49,74 @@ export function accountsFromHrefs(hrefs: string[]): string[] {
   return found
 }
 
+/** Result-column handles, minus accounts that only appear in the sidebar, nav, or suggestions. */
+export function visibleSearchAccounts(resultHrefs: string[], chromeHrefs: string[], cap: number): string[] {
+  const chrome = new Set(accountsFromHrefs(chromeHrefs).map((name) => name.toLowerCase()))
+  return accountsFromHrefs(resultHrefs).filter((name) => !chrome.has(name.toLowerCase())).slice(0, Math.max(0, cap))
+}
+
+/**
+ * Names come from the result column when it has any.
+ * Query-tagged search responses only fill follower counts, or supply names when the column is still empty.
+ * Accounts that only exist in the sidebar are never added.
+ */
+export function accountsFromSearchHits(
+  domNames: string[],
+  hits: PageAccount[],
+  chromeNames: string[],
+  cap: number,
+): PageAccount[] {
+  const chrome = new Set(chromeNames.map((name) => name.toLowerCase()))
+  const followers = new Map<string, number | null>()
+  for (const hit of hits) {
+    const name = usernameFromHandle(hit.username)
+    if (!name || chrome.has(name.toLowerCase())) continue
+    const key = name.toLowerCase()
+    const known = followers.get(key)
+    if (known == null) followers.set(key, hit.followers)
+  }
+  const source = domNames.length > 0 ? domNames : [...followers.keys()]
+  const ordered: PageAccount[] = []
+  const seen = new Set<string>()
+  for (const raw of source) {
+    const name = usernameFromHandle(raw)
+    if (!name) continue
+    const key = name.toLowerCase()
+    if (chrome.has(key) || seen.has(key)) continue
+    seen.add(key)
+    ordered.push({ username: name, followers: followers.get(key) ?? null })
+    if (ordered.length >= cap) break
+  }
+  return ordered
+}
+
+/** True when this request belongs to the open keyword search page and carries that query. */
+export function requestMatchesKeyword(pageHref: string, requestUrl: string, body: string): boolean {
+  let query = ''
+  try {
+    const page = new URL(pageHref)
+    if (!page.pathname.toLowerCase().includes('/explore/search/keyword')) return false
+    query = (page.searchParams.get('q') || '').trim().toLowerCase()
+  } catch {
+    return false
+  }
+  if (query.length < 2) return false
+  return `${requestUrl}\n${body}`.toLowerCase().includes(query)
+}
+
+export function searchCaptureNote(keyword: string, usernames: string[]): { status: number; snippet: string; note: string } {
+  if (usernames.length === 0) {
+    const snippet = 'The search page did not list any accounts.'
+    return { status: 0, snippet, note: `No accounts for “${keyword}”. ${snippet}` }
+  }
+  const handles = usernames.map((name) => `@${name.replace(/^@/, '')}`)
+  return {
+    status: 200,
+    snippet: `${usernames.length} accounts: ${handles.join(', ')}`,
+    note: `${keyword}: ${handles.join(', ')}`,
+  }
+}
+
 export function mergeSearchAccounts(captured: PageAccount[], domUsernames: string[], cap: number): PageAccount[] {
   const byName = new Map<string, PageAccount>()
   for (const account of captured) {

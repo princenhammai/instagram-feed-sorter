@@ -1,8 +1,9 @@
 import { enrichPost, hasPlayableVideo, loadPage, mediaByShortcode, resetReelsSource, similarAccounts, storyPosts } from './api'
-import { nudgeReelGrid } from './capture-reels'
+import { nudgeSortGrid } from './capture-reels'
 import { batchIsActive, consumeBatchLeave, loadJob, markPaused, markResumed, onBatchResume, resumeBatch } from './batch-run'
 import { consumeSnowballLeave, loadSnowball, markSnowballPaused, markSnowballResumed, onSnowballResume, resumeSnowballRun, snowballIsActive } from './snowball-run'
 import { reelsUrl } from '../lib/batch'
+import { runSortCapture } from '../lib/sort-capture'
 import { callMain } from './bridge'
 import { downloadToFolder, pickFolder } from './downloads'
 import { CLOSED_SIMILAR, getSnap, notify, patch, type DownloadState } from './store'
@@ -313,14 +314,7 @@ function relevantPosts(surface: SortableSurface, posts: Post[]): Post[] {
 }
 
 function nudgeScroll(idleRounds: number): void {
-  const surface = parseSurface(location.href)
-  if ((surface.kind === 'posts' || surface.kind === 'reels') && surface.username) {
-    nudgeReelGrid(surface.username, idleRounds)
-    return
-  }
-  const page = document.scrollingElement || document.documentElement
-  if (idleRounds > 0 && idleRounds % 2 === 0) window.scrollBy(0, -900)
-  window.scrollTo(0, page.scrollHeight)
+  nudgeSortGrid(idleRounds)
 }
 
 async function captureSort(choice: RangeChoice, sortKey: SortKey): Promise<void> {
@@ -341,6 +335,43 @@ async function captureSort(choice: RangeChoice, sortKey: SortKey): Promise<void>
   }
 
   show(0, null, 'Reading this profile')
+
+  if (!dated) {
+    let failed = false
+    const result = await runSortCapture({
+      read: async () => {
+        try {
+          return relevantPosts(surface, (await callMain({ action: 'captured' })) as Post[])
+        } catch (error) {
+          failed = true
+          throw error
+        }
+      },
+      nudge: nudgeScroll,
+      sleep: pause,
+      limit: resolved.limit,
+      signal: controller.signal,
+      onProgress: (count) => {
+        const percent = choice.count === 'all' ? null : Math.min(100, (count / resolved.limit) * 100)
+        show(count, percent, `${count} ${noun} found. Leave this tab in front.`)
+      },
+    })
+    window.scrollTo(0, 0)
+    if (token !== runToken) return
+    if (failed || result.posts.length === 0) {
+      if (controller.signal.aborted && !failed) {
+        patch({ phase: { type: 'error', message: 'Sort stopped before any posts came back.' } })
+        return
+      }
+      await startSort(choice, sortKey)
+      return
+    }
+    const capped = choice.count === 'all' && result.posts.length >= resolved.limit
+    await showResults(token, surface, result.posts, choice, sortKey, capped)
+    if (controller.signal.aborted) notify('Stopped early. Showing the posts already collected.')
+    return
+  }
+
   await pause(700, controller.signal)
 
   let all: Post[] = []

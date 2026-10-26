@@ -38,6 +38,7 @@ export function ResearchPanel({
   running,
   paused,
   progress,
+  keywordAccounts = '',
   alert,
   status,
   rows,
@@ -72,6 +73,7 @@ export function ResearchPanel({
   running: boolean
   paused: boolean
   progress: string
+  keywordAccounts?: string
   alert: string
   status: string
   rows: ResearchRow[]
@@ -201,7 +203,7 @@ export function ResearchPanel({
       <p className="note">
         {mode === 'batch'
           ? 'Reads each profile’s Reels grid the same way Sort does, 1.2s apart. A run that finds no reels stays paused instead of exporting an empty file. Only HTTP 429 or feedback_required pauses for rate limiting.'
-          : 'Keywords open the search page and read the accounts it loads, up to 15 each, with provenance search: keyword. Max accounts is the STRONG target. Max depth is how far expansion goes.'}
+          : 'Keywords open the search page and read the accounts in the results, up to 15 each, with provenance search: keyword. Those handles are listed here. Max accounts is the STRONG target. Max depth is how far expansion goes.'}
       </p>
 
       <div className="row">
@@ -225,6 +227,9 @@ export function ResearchPanel({
         <p className="research-progress" role="status">
           {progress}
         </p>
+      )}
+      {keywordAccounts && (
+        <p className="research-progress">Keyword accounts: {keywordAccounts}</p>
       )}
       {alert && (
         <p className="research-error" role="alert">

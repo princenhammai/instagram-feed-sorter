@@ -41,6 +41,7 @@ import {
   parseKeywords,
   isSnowballJob,
   plan,
+  keywordAccountHandles,
   progressLabel,
   type SnowballJob,
 } from '../../lib/snowball'
@@ -472,6 +473,7 @@ export function ResearchDock() {
           running={Boolean(running)}
           paused={Boolean(paused)}
           progress={progress}
+          keywordAccounts={mode === 'snowball' && snowJob ? keywordAccountHandles(snowJob).map((name) => `@${name}`).join(', ') : ''}
           alert={alert || jobAlert}
           status={status}
           rows={rows}

@@ -1,3 +1,37 @@
+# Instagram Feed Sorter v0.4.5
+
+Batch and snowball use the v0.3.2 Sort capture again: the window scroll, the same waits, and the reels already returned with the first response. A profile that is still short after 90 seconds is skipped and the batch continues. Keyword handles from the search results are listed on the panel and in the request log. Sidebar and suggested accounts are not treated as search hits. Still read-only. No new paid service and no Instagram writes.
+
+## Install the extension
+
+Download **instagram-feed-sorter-v0.4.5.zip** and **SHA256SUMS.txt**. From the folder that contains both, run `sha256sum -c SHA256SUMS.txt`. Extract the extension zip, then use Developer mode → Load unpacked in desktop Chrome or Edge. Select the folder that contains `manifest.json`. The manifest version is **0.4.5**. Sign in to Instagram yourself and open a profile's Reels tab. Reload the extension after replacing an older unpacked folder, then refresh Instagram.
+
+No Node.js, API key, or server is needed for sorting, batching, snowball research, or file export. This is a desktop Chromium build.
+
+## Install the video breakdown CLI
+
+Download **instagram-feed-sorter-breakdown-v0.4.5.zip**. It contains `breakdown.py`, `requirements.txt`, and `INSTALL.md`. ffmpeg and ffprobe are required. tesseract and faster-whisper are optional and free. Follow `INSTALL.md` inside the zip. This script is experimental.
+
+## Quickstart
+
+- **Research panel.** On an Instagram tab, choose Research. Paste handles. Snowball also has a Keywords field, plus Max accounts (20) and Max depth (2). Set Reels per account (100 for batch, 30 for snowball). That count stays after Run, and the number fields accept digits only. Run Batch or Snowball. Keyword accounts are listed under the progress line. The results table sorts by × median, engagement, or views, and hides paid reels until you show them. Snowball rows show provenance such as `search: keyword`. Export, Download top 10, and Sync are one click. Resume stays on the panel.
+- **Request log.** Each account line shows the HTTP status, URL, and how many reels were captured. A skip says `Timed out after 90s` when the account did not finish. A keyword line lists the handles, for example `4 accounts: @magic.mike, @ada`.
+- **Batch runner.** Each account uses Sort's window scroll. Reels from the first response stay, then scrolling adds more. The account ends at the target, after six quiet rounds, or at 90 seconds. If every account comes back empty, the batch stays paused and does not save an empty export.
+- **Account finder.** On a profile or Reels tab, Find accounts stays on the right.
+- **Sheets and Notion.** Options page. Both stay off until you enable them. Notion uses a token stored only in this browser.
+- **Video breakdown.** Download top N, then `python3 breakdown.py "rank01_ada_AbC.mp4" --out breakdowns --whisper-model tiny`.
+
+## Included
+
+- Batch, snowball, and Sort share one capture loop: read the network capture, scroll the window by the v0.3.2 nudge, wait 700ms after a new page and 1000ms when nothing new arrived, and stop after six quiet rounds. A later empty read does not erase reels already captured.
+- Each batch or snowball account stops after 90 seconds. The request log records the skip, and the run continues with the next account.
+- Keyword search keeps accounts linked in the results column. Suggested, following, and sidebar accounts are excluded. The handles are shown on the panel and in the request log.
+- Progress repaints when the reel count changes, and at most about once a second, so typing in the panel stays in the field you clicked.
+- A fixture test replays a 5-reel page, then a longer page after the scroll nudge, and checks the first page is not dropped when a later read comes back empty.
+- v0.4.4, below, is included.
+
+For updates, replace files in the same loaded folder, reload the extension, then refresh Instagram. Check `SHA256SUMS.txt` against every asset on this release. A folder that still says manifest 0.4.4 is an older build.
+
 # Instagram Feed Sorter v0.4.4
 
 Batch and snowball keep scrolling each profile's Reels grid until the target count arrives or new scrolls stop adding reels. Keyword lookup opens Instagram's search page and reads the accounts that page loads. Snowball shows Max accounts and Max depth. Still read-only. No new paid service and no Instagram writes.

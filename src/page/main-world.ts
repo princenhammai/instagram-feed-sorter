@@ -1,4 +1,5 @@
-import { extractFollowerCounts, extractItems, extractUserId, extractUsers } from '../lib/instagram/extract'
+import { extractFollowerCounts, extractItems, extractSearchUsers, extractUserId, extractUsers } from '../lib/instagram/extract'
+import { requestMatchesKeyword } from '../lib/page-accounts'
 import { hashtagUrl } from '../lib/instagram/search'
 import { isInstagramDataUrl, mergePost, parseBodies } from '../lib/instagram/capture'
 import { normalizeMedia } from '../lib/instagram/normalize'
@@ -362,6 +363,8 @@ async function run(call: MainCall): Promise<unknown> {
     case 'captured-accounts':
       scanEmbedded()
       return Array.from(capturedAccounts.values())
+    case 'search-hits':
+      return Array.from(searchHits.values())
     case 'followers':
       return followers(call.username || '')
     case 'following':
@@ -393,6 +396,7 @@ function hookHistory(): void {
 
 const captured = new Map<string, Post>()
 const capturedAccounts = new Map<string, SimilarAccount>()
+const searchHits = new Map<string, SimilarAccount>()
 const followerCounts = new Map<string, number>()
 const userIds = new Map<string, string>()
 const scannedScripts = new WeakSet<Element>()
@@ -455,8 +459,33 @@ async function followers(username: string): Promise<number | null> {
   return followerCounts.get(key) ?? null
 }
 
-function ingestText(text: string): void {
-  for (const body of parseBodies(text)) ingest(body)
+function bodyText(body: unknown): string {
+  if (typeof body === 'string') return body
+  if (body instanceof URLSearchParams) return body.toString()
+  if (typeof FormData !== 'undefined' && body instanceof FormData) {
+    const parts: string[] = []
+    body.forEach((value, key) => {
+      if (typeof value === 'string') parts.push(`${key}=${value}`)
+    })
+    return parts.join('&')
+  }
+  return ''
+}
+
+function rememberSearch(raw: unknown, url: string, body: string): void {
+  if (!requestMatchesKeyword(location.href, url, body)) return
+  for (const account of extractSearchUsers(raw)) {
+    const key = account.username.toLowerCase()
+    const existing = searchHits.get(key)
+    if (!existing || (existing.followers == null && account.followers != null)) searchHits.set(key, account)
+  }
+}
+
+function ingestText(text: string, meta?: { url: string; body: string }): void {
+  for (const parsed of parseBodies(text)) {
+    ingest(parsed)
+    if (meta) rememberSearch(parsed, meta.url, meta.body)
+  }
 }
 
 function scanEmbedded(): void {
@@ -480,11 +509,13 @@ function hookNetwork(): void {
   window.fetch = async function (this: unknown, ...args: Parameters<typeof fetch>) {
     const response = await originalFetch.apply(this, args)
     try {
-      if (isInstagramDataUrl(requestUrl(args[0]), location.href)) {
+      const url = requestUrl(args[0])
+      if (isInstagramDataUrl(url, location.href)) {
+        const body = bodyText(args[1]?.body)
         response
           .clone()
           .text()
-          .then(ingestText)
+          .then((text) => ingestText(text, { url, body }))
           .catch(() => undefined)
       }
     } catch {
@@ -502,11 +533,16 @@ function hookNetwork(): void {
     return open.apply(this, args)
   }
   proto.send = function (this: TaggedRequest, body?: Document | XMLHttpRequestBodyInit | null) {
-    if (this.__ifsUrl && isInstagramDataUrl(this.__ifsUrl, location.href)) {
+    const url = this.__ifsUrl || ''
+    const sent = bodyText(body)
+    if (url && isInstagramDataUrl(url, location.href)) {
       this.addEventListener('load', () => {
         try {
-          if (this.responseType === '' || this.responseType === 'text') ingestText(this.responseText)
-          else if (this.responseType === 'json') ingest(this.response)
+          if (this.responseType === '' || this.responseType === 'text') ingestText(this.responseText, { url, body: sent })
+          else if (this.responseType === 'json') {
+            ingest(this.response)
+            rememberSearch(this.response, url, sent)
+          }
         } catch {
           // Ignore responses we cannot read.
         }
