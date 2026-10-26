@@ -3,21 +3,28 @@ import { getSnap, notify, patch, type BatchProgress } from './store'
 import {
   BATCH_KEY,
   BATCH_PROGRESS_KEY,
+  SEEN_KEY,
   accountGroups,
+  applyAccountOutcome,
   batchCsv,
+  batchFreshTable,
   batchReelTable,
   batchSummaryTable,
-  compactReel,
   createJob,
   currentHandle,
   isBatchJob,
+  isRateLimited,
+  mergeSeen,
   pauseJob,
   progressLabel,
   reelsUrl,
   resumeJob,
-  withAccount,
-  type AccountResult,
+  seenFromReels,
+  seenKeySet,
+  summaryChartHtml,
+  type AccountDecision,
   type BatchJob,
+  type SeenReel,
 } from '../lib/batch'
 import { collectPosts } from '../lib/instagram/collect'
 import { buildWorkbook } from '../lib/xlsx'
@@ -59,6 +66,24 @@ export async function loadJob(): Promise<BatchJob | null> {
 
 export async function saveJob(job: BatchJob): Promise<void> {
   await chrome.storage.local.set({ [BATCH_KEY]: job })
+}
+
+async function loadSeen(): Promise<SeenReel[]> {
+  const stored = await chrome.storage.local.get(SEEN_KEY)
+  const value = stored[SEEN_KEY]
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (item): item is SeenReel =>
+      Boolean(item) &&
+      typeof item === 'object' &&
+      typeof (item as SeenReel).username === 'string' &&
+      typeof (item as SeenReel).shortcode === 'string',
+  )
+}
+
+async function remember(reels: SeenReel[]): Promise<void> {
+  if (reels.length === 0) return
+  await chrome.storage.local.set({ [SEEN_KEY]: mergeSeen(await loadSeen(), reels) })
 }
 
 async function saveProgress(progress: BatchProgress | null): Promise<void> {
@@ -111,6 +136,7 @@ async function exportJob(job: BatchJob): Promise<void> {
   })
   const bytes = new Uint8Array(await buildWorkbook([
     { name: 'Reels', rows: batchReelTable(groups) },
+    { name: 'New reels', rows: batchFreshTable(groups) },
     { name: 'Summary', rows: batchSummaryTable(groups.map((group) => group.summary)) },
   ]))
   const xlsxResult = await deliver({
@@ -118,6 +144,12 @@ async function exportJob(job: BatchJob): Promise<void> {
     filename: `${base}.xlsx`,
     mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     base64: bytesToBase64(bytes),
+  })
+  const chartResult = await deliver({
+    type: 'DOWNLOAD_TEXT',
+    filename: `${base}-summary.html`,
+    mime: 'text/html;charset=utf-8',
+    text: summaryChartHtml(groups.map((group) => group.summary)),
   })
   const stored = await chrome.storage.local.get(SYNC_KEY)
   const sync = cleanSync(stored[SYNC_KEY] as Partial<SyncSettings> | undefined)
@@ -130,7 +162,11 @@ async function exportJob(job: BatchJob): Promise<void> {
     const notion = await deliver({ type: 'NOTION_SYNC', rows: summaryRows(job), delayMs: job.delayMs })
     syncNote += notion.ok ? ' Sent the summary to Notion.' : ` Notion: ${notion.error || 'could not add the rows.'}`
   }
-  const problem = [csvResult.ok ? '' : csvResult.error || 'CSV was not saved.', xlsxResult.ok ? '' : xlsxResult.error || 'Excel was not saved.']
+  const problem = [
+    csvResult.ok ? '' : csvResult.error || 'CSV was not saved.',
+    xlsxResult.ok ? '' : xlsxResult.error || 'Excel was not saved.',
+    chartResult.ok ? '' : chartResult.error || 'The summary chart was not saved.',
+  ]
     .filter(Boolean)
     .join(' ')
   notify(problem ? `Batch finished. ${problem}${syncNote}` : `Batch export saved for ${job.handles.length} accounts.${syncNote}`)
@@ -171,15 +207,14 @@ async function runOnce(): Promise<void> {
   const latest = await loadJob()
   if (!latest || latest.status !== 'running') return
 
+  const known = seenKeySet(await loadSeen())
   let followers: number | null = null
   try {
     followers = await followerCount(handle)
   } catch (error) {
     const message = humanError(error)
-    if (/rate limit|429/i.test(message)) {
-      await saveJob(pauseJob(latest, message))
-      patch({ phase: { type: 'idle' }, batch: null })
-      notify(`${message} Resume the batch from the popup when Instagram has calmed down.`)
+    if (isRateLimited(message)) {
+      await settle(applyAccountOutcome(latest, handle, { followers: null, posts: [], thrown: message }, known))
       return
     }
     followers = null
@@ -206,70 +241,52 @@ async function runOnce(): Promise<void> {
       },
       load: (maxId) => loadPage({ kind: 'reels', username: handle }, maxId),
     })
-    if (signal.aborted || result.stopped) {
-      const paused = pauseJob(await loadJob().then((job) => job ?? latest), 'Paused.')
-      await saveJob(paused)
-      patch({ phase: { type: 'idle' }, batch: null })
-      notify('Batch paused. Resume it from the extension popup.')
-      return
-    }
-    const account: AccountResult = {
-      username: handle,
-      status: 'done',
-      followers,
-      reels: result.posts.map(compactReel),
-    }
-    let next = withAccount(latest, account)
-    if (result.interrupted && /rate limit|429/i.test(result.interrupted)) {
-      next = pauseJob({ ...latest, note: result.interrupted }, result.interrupted)
-      await saveJob(next)
-      patch({ phase: { type: 'idle' }, batch: null })
-      notify(`${result.interrupted} Resume the batch from the popup when Instagram has calmed down.`)
-      return
-    }
-    if (result.posts.length === 0) {
-      next = withAccount(latest, {
-        username: handle,
-        status: 'error',
-        error: result.interrupted || 'No reels came back. The account may be private.',
-        followers,
-        reels: [],
-      })
-    }
-    await saveJob(next)
-    if (next.status === 'done') {
-      patch({ phase: { type: 'idle' }, batch: null })
-      await saveProgress(null)
-      await exportJob(next)
-      return
-    }
-    const upcoming = currentHandle(next)
-    if (!upcoming) return
-    leaveFor(upcoming)
+    const fresh = await loadJob()
+    await settle(
+      applyAccountOutcome(
+        fresh && fresh.status === 'running' ? fresh : latest,
+        handle,
+        {
+          followers,
+          posts: result.posts,
+          interrupted: result.interrupted,
+          stopped: result.stopped,
+          aborted: signal.aborted,
+        },
+        known,
+      ),
+    )
   } catch (error) {
-    if (signal.aborted) {
-      await saveJob(pauseJob(latest))
-      patch({ phase: { type: 'idle' }, batch: null })
-      return
-    }
-    const message = humanError(error)
-    if (/rate limit|429/i.test(message)) {
-      await saveJob(pauseJob(latest, message))
-      patch({ phase: { type: 'idle' }, batch: null })
-      notify(`${message} Resume the batch from the popup when Instagram has calmed down.`)
-      return
-    }
-    const next = withAccount(latest, { username: handle, status: 'error', error: message, followers, reels: [] })
-    await saveJob(next)
-    if (next.status === 'done') {
-      patch({ phase: { type: 'idle' }, batch: null })
-      await saveProgress(null)
-      await exportJob(next)
-      return
-    }
-    const upcoming = currentHandle(next)
-    if (upcoming) leaveFor(upcoming)
+    const message = signal.aborted ? '' : humanError(error)
+    await settle(
+      applyAccountOutcome(latest, handle, { followers, posts: [], aborted: signal.aborted, thrown: message }, known),
+    )
   }
+}
+
+async function settle(decision: AccountDecision): Promise<void> {
+  await saveJob(decision.job)
+  if (decision.type === 'pause') {
+    patch({ phase: { type: 'idle' }, batch: null })
+    await saveProgress(null)
+    const calm = decision.message !== 'Paused.'
+    notify(
+      calm
+        ? `${decision.message} Resume the batch from the popup when Instagram has calmed down.`
+        : 'Batch paused. Resume it from the extension popup.',
+    )
+    return
+  }
+  const account = decision.job.accounts[decision.job.accounts.length - 1]
+  if (account?.status === 'done') await remember(seenFromReels(account.reels))
+  if (decision.job.status === 'done') {
+    patch({ phase: { type: 'idle' }, batch: null })
+    await saveProgress(null)
+    await exportJob(decision.job)
+    return
+  }
+  const upcoming = currentHandle(decision.job)
+  if (upcoming) leaveFor(upcoming)
 }
 
 function pause(ms: number, signal: AbortSignal): Promise<boolean> {

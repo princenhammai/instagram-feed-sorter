@@ -363,6 +363,7 @@ input:focus, select:focus { outline: 1px solid var(--accent); border-color: tran
 .transcript { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
 .transcript p:last-child { margin: 6px 0 0; white-space: pre-wrap; font-size: 13px; max-height: 220px; overflow: auto; }
 .error-text { color: var(--danger); }
+.hook { margin: 0 0 8px; font-size: 15px; font-weight: 700; line-height: 1.35; color: #f4f6f8; }
 .caption { margin: 0; white-space: pre-wrap; font-size: 13px; color: #cfd2d8; }
 
 .similar {

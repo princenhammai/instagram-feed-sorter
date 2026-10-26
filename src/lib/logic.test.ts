@@ -166,6 +166,7 @@ describe('export columns', () => {
     for (const header of [
       'Thumbnail URL',
       'Caption',
+      'Hook',
       'Views',
       'Likes',
       'Comments',
@@ -194,6 +195,7 @@ describe('export columns', () => {
       samplePost({ views: 200, likes: 10, comments: 2, duration: 12.2, audio: 'Original audio — ada', caption: 'hello #ad' }),
     ])
     const row = toCsv(exportColumns(), [post])
+    expect(exportColumns().find((column) => column.header === 'Hook')?.value(post)).toBe('hello')
     expect(row).toContain('Original audio — ada')
     expect(row).toContain('Yes')
     expect(row).toContain('#ad')

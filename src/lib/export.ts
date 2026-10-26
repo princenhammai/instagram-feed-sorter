@@ -1,3 +1,4 @@
+import { captionHook } from './research'
 import type { Post, SortableSurface } from './types'
 
 export interface Column {
@@ -24,6 +25,7 @@ export function exportColumns(): Column[] {
     { header: 'Permalink', value: (post) => post.url },
     { header: 'Published date', value: (post) => formatExportDate(post.takenAt) },
     { header: 'Caption', value: (post) => post.caption },
+    { header: 'Hook', value: (post) => captionHook(post.caption) },
     { header: 'Views', value: (post) => post.views },
     { header: 'Likes', value: (post) => post.likes },
     { header: 'Comments', value: (post) => post.comments },

@@ -5,7 +5,7 @@ Instagram Feed Sorter has no publisher-operated backend or analytics service.
 ## Local data
 
 - Saved posts, captions, metrics and any stored media are kept in IndexedDB (`ifs-library`).
-- Settings, the transcription key you enter, a batch in progress, the account-finder list, and cached transcripts are kept in this browser's extension storage.
+- Settings, the transcription key you enter, a batch in progress, the account-finder list, a local list of Reel shortcodes already exported, and cached transcripts are kept in this browser's extension storage.
 - An optional Notion integration token is kept in the same local storage and is sent only to `api.notion.com` when you turn Notion sync on. Google Sheet sync uses your existing Google session and stays off until you enable it.
 - This data is not bundled in a release or synchronized by this project between devices.
 - Removing an installation or changing its identity can make its local data unavailable. Download/export important files before doing so.

@@ -60,6 +60,8 @@ export interface Post {
   commentRate?: number | null
   likelyPaid?: boolean
   paidSignals?: string[]
+  /** True when this shortcode was already stored by an earlier batch on this browser. */
+  seenBefore?: boolean
 }
 
 export type Surface =

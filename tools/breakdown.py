@@ -147,23 +147,44 @@ def transcribe(path: Path, ffmpeg: str, model: str | None) -> tuple[str | None, 
     extracted = run([ffmpeg, '-y', '-i', str(path), '-vn', '-ac', '1', '-ar', '16000', str(wav)])
     if extracted.returncode != 0:
         return None, 'ffmpeg could not extract audio for a transcript.'
+    failure = ''
     try:
-        text = whisper_python(wav, model) or whisper_cpp(wav, model)
+        try:
+            text = whisper_python(wav, model)
+        except Exception as error:
+            text = None
+            failure = str(error).strip()
+        if not text:
+            text = whisper_cpp(wav, model)
     finally:
         wav.unlink(missing_ok=True)
     if text:
         return text.strip(), None
+    if failure:
+        return None, f'Local transcription failed: {failure}'
     return None, 'No local transcriber is installed. Install faster-whisper or put whisper-cli on PATH.'
 
 
 def whisper_python(wav: Path, model: str | None) -> str | None:
     try:
+        import av
         from faster_whisper import WhisperModel  # type: ignore
     except Exception:
         return None
-    whisper = WhisperModel(model or 'base', device='cpu', compute_type='int8')
-    segments, _info = whisper.transcribe(str(wav))
-    return ' '.join(segment.text.strip() for segment in segments).strip()
+    # faster-whisper 1.2 passes metadata_errors, which PyAV 19 does not accept.
+    original_open = av.open
+
+    def open_compat(*args, **kwargs):
+        kwargs.pop('metadata_errors', None)
+        return original_open(*args, **kwargs)
+
+    av.open = open_compat
+    try:
+        whisper = WhisperModel(model or 'base', device='cpu', compute_type='int8')
+        segments, _info = whisper.transcribe(str(wav))
+        return ' '.join(segment.text.strip() for segment in segments).strip()
+    finally:
+        av.open = original_open
 
 
 def whisper_cpp(wav: Path, model: str | None) -> str | None:
@@ -174,6 +195,22 @@ def whisper_cpp(wav: Path, model: str | None) -> str | None:
     if result.returncode != 0:
         return None
     return (result.stdout or result.stderr).strip()
+
+
+def ocr_sample_times(duration: float, cuts: list[float], every: float) -> list[float]:
+    raw = [0.35]
+    raw.extend(cut + 0.12 for cut in cuts)
+    raw.extend(frame_times(duration, every))
+    times: list[float] = []
+    for value in raw:
+        if value < 0 or value >= max(duration, 0):
+            continue
+        if any(abs(value - kept) < 0.2 for kept in times):
+            continue
+        times.append(round(value, 3))
+        if len(times) >= 8:
+            break
+    return times or [0.0]
 
 
 def ocr_image(image: Path) -> str | None:
@@ -187,6 +224,30 @@ def ocr_image(image: Path) -> str | None:
     return '\n'.join(dict.fromkeys(lines))
 
 
+def ocr_frames(ffmpeg: str, path: Path, times: list[float]) -> str | None:
+    if not shutil.which('tesseract'):
+        return None
+    lines: list[str] = []
+    seen: set[str] = set()
+    for index, timestamp in enumerate(times):
+        image = path.with_name(f'.{path.stem}-ocr-{index}.png')
+        try:
+            result = run([ffmpeg, '-y', '-ss', f'{timestamp:.3f}', '-i', str(path), '-frames:v', '1', str(image)])
+            if result.returncode != 0 or not image.exists():
+                continue
+            text = ocr_image(image)
+        finally:
+            image.unlink(missing_ok=True)
+        if not text:
+            continue
+        for line in text.splitlines():
+            if line in seen:
+                continue
+            seen.add(line)
+            lines.append(line)
+    return '\n'.join(lines) or None
+
+
 def breakdown(path: Path, out_dir: Path, every: float, threshold: float, model: str | None) -> dict:
     ffmpeg = require_tool('ffmpeg')
     duration = probe_duration(path)
@@ -196,16 +257,19 @@ def breakdown(path: Path, out_dir: Path, every: float, threshold: float, model: 
     first = folder / 'first-second.jpg'
     contact_sheet(ffmpeg, path, contact, duration, every, False)
     contact_sheet(ffmpeg, path, first, duration, every, True)
+    cuts = scene_cuts(ffmpeg, path, threshold)
     transcript, transcript_note = transcribe(path, ffmpeg, model)
-    ocr_parts = [ocr_image(contact), ocr_image(first)]
-    ocr_text = '\n'.join(part for part in ocr_parts if part)
+    ocr_text = ocr_frames(ffmpeg, path, ocr_sample_times(duration, cuts, every))
+    if not ocr_text:
+        ocr_parts = [ocr_image(contact), ocr_image(first)]
+        ocr_text = '\n'.join(part for part in ocr_parts if part) or None
     report = {
         'file': path.name,
         'durationSeconds': round(duration, 3),
         'frameEverySeconds': every,
         'frameSeconds': frame_times(duration, every),
         'firstSecondSeconds': first_second_times(duration),
-        'sceneCuts': scene_cuts(ffmpeg, path, threshold),
+        'sceneCuts': cuts,
         'contactSheet': contact.name,
         'firstSecondSheet': first.name,
         'transcript': transcript,

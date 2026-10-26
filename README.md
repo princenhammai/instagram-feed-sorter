@@ -46,7 +46,7 @@ The extension is portable across desktop operating systems. GitHub hosting does 
 
 On an Instagram tab, open the extension popup and paste handles (one per line, or profile URLs). Set how many Reels to load per account (up to 200) and the delay between Instagram requests (400–10000 ms, default 1200). Run batch.
 
-The tab visits each profile's Reels page, reads up to N Reels, and scores that account on its own median. The export is one CSV of every Reel plus one Excel workbook with a Reels sheet and a Summary sheet (reels loaded, median views, top Reel, and how many Reels are at 3× the account median). Pause keeps the finished accounts. Resume continues at the next handle. A rate limit pauses the job instead of hammering Instagram.
+The tab visits each profile's Reels page, reads up to N Reels, and scores that account on its own median. The export is one CSV of every Reel, one Excel workbook, and an HTML summary chart. The workbook has a Reels sheet, a New reels sheet, and a Summary sheet (reels loaded, median views, top Reel, how many Reels are at 3× the account median, and how many were already seen). Each Reel row includes the caption hook: the first line that still says something after hashtags and @mentions are removed. Pause keeps the finished accounts. Resume continues at the same handle. A rate limit, including Instagram's "please wait a few minutes" response, pauses the job instead of advancing. Shortcodes already exported on this browser are marked Seen before and left off the New reels sheet, so a later run does not treat them as new discoveries. The HTML file charts median views and 3× Reels per account.
 
 ## Account finder
 
@@ -61,16 +61,17 @@ Open the extension's options page. Sync is off by default.
 
 ## Video breakdown
 
-After Download top N, the files are named `rank01_<handle>_<shortcode>.mp4`. A local Python script turns those files into a contact sheet, scene-cut times, and notes. It does not need an API key. ffmpeg and ffprobe must be on your PATH. Speech and on-screen text run only when you have installed a local tool.
+After Download top N, the files are named `rank01_<handle>_<shortcode>.mp4`. A local Python script turns those files into a contact sheet, scene-cut times, a transcript, and on-screen text. It does not need an API key. ffmpeg and ffprobe must be on your PATH. Speech uses a local model. On-screen text uses tesseract.
 
 ```sh
-python3 tools/breakdown.py "/path/to/rank01_ada_AbC.mp4" --out breakdowns
-# optional local transcript:
-# pip install -r tools/requirements.txt   # uncomment faster-whisper first
+# Debian/Ubuntu packages, all free:
+# sudo apt-get install ffmpeg tesseract-ocr espeak-ng
+python3 -m pip install faster-whisper
+python3 tools/breakdown.py "/path/to/rank01_ada_AbC.mp4" --out breakdowns --whisper-model tiny
 python3 tools/breakdown.py ./downloads --whisper-model base
 ```
 
-Each video gets `breakdowns/<name>/<name>.md`, a JSON file, `contact.jpg` (a frame about every 2 seconds), and `first-second.jpg`. Scene cuts come from ffmpeg. A transcript is added when faster-whisper imports or `whisper-cli` is on PATH with `--whisper-model` pointing at a local model. On-screen text is added when `tesseract` is on PATH.
+Each video gets `breakdowns/<name>/<name>.md`, a JSON file, `contact.jpg` (a frame about every 2 seconds), and `first-second.jpg`. Scene cuts come from ffmpeg. A transcript is added when faster-whisper imports or `whisper-cli` is on PATH with `--whisper-model` set to a model name or a local whisper.cpp model file. On-screen text is read from full-size frames when `tesseract` is on PATH. The first run of faster-whisper downloads the chosen model once.
 
 ## Data and optional services
 

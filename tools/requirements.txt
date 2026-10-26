@@ -1,4 +1,6 @@
-# Optional. The CLI runs with ffmpeg and ffprobe on PATH and the Python standard library.
-# Uncomment a local transcriber if you want speech-to-text on this machine:
-# faster-whisper
-# On-screen text uses the tesseract binary, not a Python package.
+# Optional local extras. The CLI runs with ffmpeg and ffprobe on PATH.
+# Speech-to-text (downloads a small model on first use):
+#   python3 -m pip install faster-whisper
+# On-screen text uses the tesseract binary:
+#   sudo apt-get install tesseract-ocr
+# A spoken sample for a local test can be made with espeak-ng.

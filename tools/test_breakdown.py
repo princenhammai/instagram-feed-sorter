@@ -20,6 +20,11 @@ class BreakdownTests(unittest.TestCase):
         ])
         self.assertEqual(breakdown.parse_scene_times(log), [1.25, 4.5])
 
+    def test_ocr_times_include_a_moment_after_each_cut(self):
+        times = breakdown.ocr_sample_times(4.0, [2.0], 2)
+        self.assertIn(0.35, times)
+        self.assertTrue(any(abs(item - 2.12) < 0.001 for item in times))
+
     def test_markdown_includes_the_local_sections(self):
         text = breakdown.markdown_report({
             'file': 'rank01_ada_AbC.mp4',
