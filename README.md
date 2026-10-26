@@ -18,7 +18,7 @@ No Node.js, API key, server or developer setup is needed for normal sorting. Eac
 
 This follows Chrome's [official unpacked-extension installation flow](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked). GitHub hosts the download; the extension is not currently listed in the Chrome Web Store.
 
-The release also includes `instagram-feed-sorter-breakdown-v<VERSION>.zip` (the local video notes script), `SHA256SUMS.txt`, and `RELEASE_NOTES.md`. Check a download with `sha256sum -c SHA256SUMS.txt` from the folder that contains the files.
+The release also includes `instagram-feed-sorter-breakdown-v<VERSION>.zip` (an experimental local video-notes script), `SHA256SUMS.txt`, and `RELEASE_NOTES.md`. Check a download with `sha256sum -c SHA256SUMS.txt` from the folder that contains the files.
 
 ## Quickstart
 
@@ -48,17 +48,13 @@ Each tool uses the Instagram session already in this browser. None of them like,
 4. In that database, use a title for the account and, if you want the numbers filled in, number properties named `Median views`, `Reels loaded`, `Reels at 3x`, and `Followers`, plus a URL property `Top reel`.
 5. Run a batch. One summary row is added per account, spaced by the batch delay.
 
-### Video breakdown
+### Download top N
 
-1. In the Sorter, download the top videos. Files are named `rank01_<handle>_<shortcode>.mp4`.
-2. Install ffmpeg. For speech and on-screen text, follow [tools/INSTALL.md](tools/INSTALL.md) or the `INSTALL.md` inside the breakdown zip.
-3. From a git checkout:
+1. Sort the grid the way you want to review it.
+2. Choose **Download top N**. Files are named `rank01_<handle>_<shortcode>.mp4` and saved without a dialog per file.
+3. Send those files to the AI model you use for video review.
 
-```sh
-python3 tools/breakdown.py "/path/to/rank01_ada_AbC.mp4" --out breakdowns --whisper-model tiny
-```
-
-4. Open `breakdowns/<name>/<name>.md` for the duration, scene cuts, transcript, on-screen text, and contact sheet.
+`tools/breakdown.py` is experimental. It can write a local contact sheet, scene cuts, a transcript, and OCR, and it is not the video-analysis path. Install notes are in [tools/INSTALL.md](tools/INSTALL.md).
 
 ## Device support
 
@@ -103,9 +99,9 @@ The short version is under Quickstart. Open the extension's options page. Sync i
 
 ## Video breakdown
 
-The short version is under Quickstart. Install steps for ffmpeg, tesseract, and the local transcriber are in [tools/INSTALL.md](tools/INSTALL.md). The same instructions ship inside `instagram-feed-sorter-breakdown-v<VERSION>.zip`.
+Experimental, and not the supported way to review videos. Download top N names files `rank01_<handle>_<shortcode>.mp4` so those downloads can be sent to an AI model.
 
-After Download top N, the files are named `rank01_<handle>_<shortcode>.mp4`. The script writes a contact sheet, scene-cut times, a transcript, and on-screen text. It does not need an API key.
+The script is still available for a local contact sheet, scene cuts, a transcript, and OCR. Install steps for ffmpeg, tesseract, and the local transcriber are in [tools/INSTALL.md](tools/INSTALL.md). The same instructions ship inside `instagram-feed-sorter-breakdown-v<VERSION>.zip`. It does not need an API key.
 
 ```sh
 python3 tools/breakdown.py "/path/to/rank01_ada_AbC.mp4" --out breakdowns --whisper-model tiny
