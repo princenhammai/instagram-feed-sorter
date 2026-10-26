@@ -18,6 +18,48 @@ No Node.js, API key, server or developer setup is needed for normal sorting. Eac
 
 This follows Chrome's [official unpacked-extension installation flow](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked). GitHub hosts the download; the extension is not currently listed in the Chrome Web Store.
 
+The release also includes `instagram-feed-sorter-breakdown-v<VERSION>.zip` (the local video notes script), `SHA256SUMS.txt`, and `RELEASE_NOTES.md`. Check a download with `sha256sum -c SHA256SUMS.txt` from the folder that contains the files.
+
+## Quickstart
+
+Each tool uses the Instagram session already in this browser. None of them like, follow, comment, or message.
+
+### Batch runner
+
+1. Open Instagram and sign in. Leave that tab open.
+2. Open the extension popup and paste handles, one per line or as profile URLs.
+3. Set Reels per account (up to 200) and the delay between requests (400–10000 ms, default 1200).
+4. Choose **Run batch**. Use **Pause** and **Resume** in the same popup. Resume continues on the account that was in progress.
+5. When it finishes, your downloads folder gets one CSV, one Excel file (Reels, New reels, Summary), and an HTML chart.
+
+### Account finder
+
+1. Open a profile while signed in.
+2. In the Sorter overlay, choose **Find accounts**.
+3. Set how far to walk suggestions and how many following accounts to read. The same delay applies between requests.
+4. Choose **Collect**. New handles are stored on this browser and labeled with a source such as `suggested from ada`.
+5. Export the rows, or send them into the batch runner.
+
+### Sheets and Notion
+
+1. Open the extension options page. Both switches start off.
+2. For a Google Sheet, turn the sheet switch on. The sheet is created with the Google account already signed in to this browser when a batch finishes.
+3. For Notion, paste an integration token and a database URL, then turn Notion on. The token stays in extension storage.
+4. In that database, use a title for the account and, if you want the numbers filled in, number properties named `Median views`, `Reels loaded`, `Reels at 3x`, and `Followers`, plus a URL property `Top reel`.
+5. Run a batch. One summary row is added per account, spaced by the batch delay.
+
+### Video breakdown
+
+1. In the Sorter, download the top videos. Files are named `rank01_<handle>_<shortcode>.mp4`.
+2. Install ffmpeg. For speech and on-screen text, follow [tools/INSTALL.md](tools/INSTALL.md) or the `INSTALL.md` inside the breakdown zip.
+3. From a git checkout:
+
+```sh
+python3 tools/breakdown.py "/path/to/rank01_ada_AbC.mp4" --out breakdowns --whisper-model tiny
+```
+
+4. Open `breakdowns/<name>/<name>.md` for the duration, scene cuts, transcript, on-screen text, and contact sheet.
+
 ## Device support
 
 | Browser / device | Status |
@@ -44,29 +86,28 @@ The extension is portable across desktop operating systems. GitHub hosting does 
 
 ## Batch runner
 
-On an Instagram tab, open the extension popup and paste handles (one per line, or profile URLs). Set how many Reels to load per account (up to 200) and the delay between Instagram requests (400–10000 ms, default 1200). Run batch.
+The short version is under Quickstart. On an Instagram tab, open the extension popup and paste handles (one per line, or profile URLs). Set how many Reels to load per account (up to 200) and the delay between Instagram requests (400–10000 ms, default 1200). Run batch.
 
 The tab visits each profile's Reels page, reads up to N Reels, and scores that account on its own median. The export is one CSV of every Reel, one Excel workbook, and an HTML summary chart. The workbook has a Reels sheet, a New reels sheet, and a Summary sheet (reels loaded, median views, top Reel, how many Reels are at 3× the account median, and how many were already seen). Each Reel row includes the caption hook: the first line that still says something after hashtags and @mentions are removed. Pause keeps the finished accounts. Resume continues at the same handle. A rate limit, including Instagram's "please wait a few minutes" response, pauses the job instead of advancing. Shortcodes already exported on this browser are marked Seen before and left off the New reels sheet, so a later run does not treat them as new discoveries. The HTML file charts median views and 3× Reels per account.
 
 ## Account finder
 
-On a profile, use **Find accounts**. It reads Suggested for you, optionally walks a short chain of those suggestions, scrolls an open following dialog, and pages the following list up to the cap you set. The same delay applies between requests. New handles are stored on this browser, deduped, and labeled with a source such as `suggested from ada`. Export the new rows, or send them straight into the batch runner. This does not follow, like, or message anyone.
+The short version is under Quickstart. On a profile, use **Find accounts**. It reads Suggested for you, optionally walks a short chain of those suggestions, scrolls an open following dialog, and pages the following list up to the cap you set. The same delay applies between requests. New handles are stored on this browser, deduped, and labeled with a source such as `suggested from ada`. Export the new rows, or send them straight into the batch runner. This does not follow, like, or message anyone.
 
 ## Sheets and Notion
 
-Open the extension's options page. Sync is off by default.
+The short version is under Quickstart. Open the extension's options page. Sync is off by default.
 
 - Google Sheet uses the Google account already signed in to this browser. When a batch finishes, the merged Reel rows are created as a spreadsheet.
 - Notion uses an integration token and database URL you paste there. The token stays in extension storage. Summary rows (one per account) are added only when Notion is checked. Name number properties `Median views`, `Reels loaded`, `Reels at 3x`, and `Followers`, and a URL property `Top reel`, if you want those filled. The database title receives the account name. Requests are spaced by the batch delay.
 
 ## Video breakdown
 
-After Download top N, the files are named `rank01_<handle>_<shortcode>.mp4`. A local Python script turns those files into a contact sheet, scene-cut times, a transcript, and on-screen text. It does not need an API key. ffmpeg and ffprobe must be on your PATH. Speech uses a local model. On-screen text uses tesseract.
+The short version is under Quickstart. Install steps for ffmpeg, tesseract, and the local transcriber are in [tools/INSTALL.md](tools/INSTALL.md). The same instructions ship inside `instagram-feed-sorter-breakdown-v<VERSION>.zip`.
+
+After Download top N, the files are named `rank01_<handle>_<shortcode>.mp4`. The script writes a contact sheet, scene-cut times, a transcript, and on-screen text. It does not need an API key.
 
 ```sh
-# Debian/Ubuntu packages, all free:
-# sudo apt-get install ffmpeg tesseract-ocr espeak-ng
-python3 -m pip install faster-whisper
 python3 tools/breakdown.py "/path/to/rank01_ada_AbC.mp4" --out breakdowns --whisper-model tiny
 python3 tools/breakdown.py ./downloads --whisper-model base
 ```
@@ -99,7 +140,7 @@ npm run test:mcp
 npm run package
 ```
 
-Load `dist/` as an unpacked extension. The ready-to-share ZIP and SHA-256 checksum are written to `artifacts/`. `npm run package:zip` packages an existing production build. The same Node-based packaging script runs on Windows, macOS and Linux.
+Load `dist/` as an unpacked extension. `artifacts/` receives `instagram-feed-sorter-v<VERSION>.zip`, `instagram-feed-sorter-breakdown-v<VERSION>.zip`, `RELEASE_NOTES.md`, and `SHA256SUMS.txt`. `npm run package:zip` packages an existing production build. The same Node-based packaging script runs on Windows, macOS and Linux.
 
 The advanced local agent bridge is optional; ordinary extension use needs no bridge. See [advanced setup](docs/DEVELOPMENT.md).
 

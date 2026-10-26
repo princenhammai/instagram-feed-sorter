@@ -1,12 +1,33 @@
 # Instagram Feed Sorter v0.4.0
 
-Batch research across accounts, still read-only.
+Batch research across accounts, still read-only. No new paid service and no Instagram writes.
+
+## Install the extension
+
+Download **instagram-feed-sorter-v0.4.0.zip** and **SHA256SUMS.txt**. From the folder that contains both, run `sha256sum -c SHA256SUMS.txt`. Extract the extension zip, then use Developer mode → Load unpacked in desktop Chrome or Edge. Select the folder that contains `manifest.json`. Sign in to Instagram yourself and open a profile's Reels tab.
+
+No Node.js, API key, or server is needed for sorting, batching, or file export. This is a desktop Chromium build.
+
+## Install the video breakdown CLI
+
+Download **instagram-feed-sorter-breakdown-v0.4.0.zip**. It contains `breakdown.py`, `requirements.txt`, and `INSTALL.md`. ffmpeg and ffprobe are required. tesseract and faster-whisper are optional and free. Follow `INSTALL.md` inside the zip.
+
+## Quickstart
+
+- **Batch runner.** Popup → paste handles → set the Reel count and delay → Run batch. Pause and Resume stay in the popup. The download is one CSV, one Excel workbook, and an HTML chart.
+- **Account finder.** On a profile, Find accounts. Export the new handles or send them into the batch.
+- **Sheets and Notion.** Options page. Both stay off until you enable them. Notion uses a token stored only in this browser.
+- **Video breakdown.** Download top N, then `python3 breakdown.py "rank01_ada_AbC.mp4" --out breakdowns --whisper-model tiny`.
+
+## Included
 
 - Paste handles and the open Instagram tab visits each Reels page, loads up to 200 Reels, and waits a configurable delay between requests. One CSV, one Excel file, and an HTML chart include an account column, per-account median, × median, engagement, the paid-post flag, and the caption hook. The workbook adds a summary sheet and a sheet of Reels not seen on an earlier run. A rate limit pauses on the same account. Pause and resume keep finished accounts.
 - Find accounts on a profile from suggestions and the following list, skip handles already saved, and export them or start a batch.
 - Google Sheets and Notion sync are off until you enable them in options. Notion uses a token stored only in this browser.
-- Download top N names files `rankNN_<handle>_<shortcode>.mp4`. `tools/breakdown.py` makes a local contact sheet, scene cuts, an offline transcript, and OCR of on-screen text.
+- Download top N names files `rankNN_<handle>_<shortcode>.mp4`. The breakdown zip makes a local contact sheet, scene cuts, an offline transcript, and OCR of on-screen text.
 - v0.3.3, below, is included: exports wait until Chrome finishes the file.
+
+For updates, replace files in the same loaded folder, reload the extension, then refresh Instagram. Check `SHA256SUMS.txt` against every asset on this release.
 
 # Instagram Feed Sorter v0.3.3
 

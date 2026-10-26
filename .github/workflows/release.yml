@@ -27,8 +27,8 @@ jobs:
       - run: npm run package
         env:
           RELEASE_TAG: ${{ inputs.tag }}
-      - name: Publish extension ZIP and checksum
-        run: gh release create "$RELEASE_TAG" artifacts/*.zip artifacts/SHA256SUMS.txt --verify-tag --title "Instagram Feed Sorter $RELEASE_TAG" --notes-file RELEASE_NOTES.md
+      - name: Publish extension ZIP, breakdown CLI, checksum, and notes
+        run: gh release create "$RELEASE_TAG" artifacts/*.zip artifacts/SHA256SUMS.txt artifacts/RELEASE_NOTES.md --verify-tag --title "Instagram Feed Sorter $RELEASE_TAG" --notes-file RELEASE_NOTES.md
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}

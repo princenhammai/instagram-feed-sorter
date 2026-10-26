@@ -1,6 +1,4 @@
-# Optional local extras. The CLI runs with ffmpeg and ffprobe on PATH.
-# Speech-to-text (downloads a small model on first use):
-#   python3 -m pip install faster-whisper
-# On-screen text uses the tesseract binary:
-#   sudo apt-get install tesseract-ocr
-# A spoken sample for a local test can be made with espeak-ng.
+# Local speech-to-text. Contact sheets and scene cuts need only ffmpeg and ffprobe.
+# Install instructions: INSTALL.md
+faster-whisper
+

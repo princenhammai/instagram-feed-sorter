@@ -110,5 +110,45 @@ const filename = `instagram-feed-sorter-v${pkg.version}.zip`
 const checksum = createHash('sha256').update(bytes).digest('hex')
 await mkdir(output, { recursive: true })
 await writeFile(path.join(output, filename), bytes)
-await writeFile(path.join(output, 'SHA256SUMS.txt'), `${checksum}  ${filename}\n`)
-console.log(JSON.stringify({ version: pkg.version, file: filename, bytes: bytes.length, files: files.size, dependencyNotices: seen.size, sha256: checksum }, null, 2))
+
+const breakdownName = `instagram-feed-sorter-breakdown-v${pkg.version}.zip`
+const breakdownFiles = new Map([
+  ['breakdown.py', await readFile(path.join(root, 'tools/breakdown.py'))],
+  ['requirements.txt', await readFile(path.join(root, 'tools/requirements.txt'))],
+  ['INSTALL.md', await readFile(path.join(root, 'tools/INSTALL.md'))],
+])
+const breakdownZip = new JSZip()
+for (const [name, body] of [...breakdownFiles].sort(([a], [b]) => a.localeCompare(b))) {
+  breakdownZip.file(name, body, { date: new Date('2000-01-01T00:00:00Z'), createFolders: false, unixPermissions: 0o100644 })
+}
+const breakdownBytes = await breakdownZip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 9 }, platform: 'UNIX' })
+const breakdownChecked = await JSZip.loadAsync(breakdownBytes, { checkCRC32: true })
+for (const [name, body] of breakdownFiles) {
+  const entry = breakdownChecked.file(name)
+  if (!entry || !(await entry.async('nodebuffer')).equals(body)) throw new Error(`Breakdown ZIP verification failed: ${name}`)
+}
+await writeFile(path.join(output, breakdownName), breakdownBytes)
+const breakdownChecksum = createHash('sha256').update(breakdownBytes).digest('hex')
+
+const notesName = 'RELEASE_NOTES.md'
+const notes = await readFile(path.join(root, 'RELEASE_NOTES.md'))
+await writeFile(path.join(output, notesName), notes)
+const notesChecksum = createHash('sha256').update(notes).digest('hex')
+
+const sums = [
+  [checksum, filename],
+  [breakdownChecksum, breakdownName],
+  [notesChecksum, notesName],
+].sort((a, b) => a[1].localeCompare(b[1]))
+await writeFile(path.join(output, 'SHA256SUMS.txt'), sums.map(([hash, name]) => `${hash}  ${name}\n`).join(''))
+console.log(JSON.stringify({
+  version: pkg.version,
+  file: filename,
+  bytes: bytes.length,
+  files: files.size,
+  dependencyNotices: seen.size,
+  sha256: checksum,
+  breakdown: breakdownName,
+  breakdownBytes: breakdownBytes.length,
+  breakdownSha256: breakdownChecksum,
+}, null, 2))
