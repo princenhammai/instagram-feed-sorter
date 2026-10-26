@@ -1,3 +1,15 @@
+/** "1,234 followers", "1.2M followers", and "12K followers". */
+export function parseFollowerCount(text: string): number | null {
+  const match = text.match(/([\d][\d,]*(?:\.\d+)?)\s*([KMB])?\s+followers\b/i)
+  if (!match) return null
+  const digits = match[1].replace(/,/g, '')
+  const unit = (match[2] || '').toUpperCase()
+  const scale = unit === 'B' ? 1_000_000_000 : unit === 'M' ? 1_000_000 : unit === 'K' ? 1_000 : 1
+  const value = Number(digits) * scale
+  if (!Number.isFinite(value) || value < 0) return null
+  return Math.round(value)
+}
+
 export function findUserIdInText(text: string, username: string): string | undefined {
   const name = username.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const marker = new RegExp(`"username"\\s*:\\s*"${name}"`, 'gi')

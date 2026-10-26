@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyAccountOutcome, createJob, isRateLimited, scoreAccount, uniquePosts } from '../batch'
+import { applyAccountOutcome, createJob, isRateLimited, resumeJob, scoreAccount, SLOWDOWN_MESSAGE, SLOWDOWN_MS, uniquePosts } from '../batch'
 import { formatRequestLine, hasFeedbackRequired, httpFailureMessage, responseSnippet } from './page-data'
 import { withResearch } from '../research'
 import { extractFollowerCounts, extractItems, extractNext, extractUsers } from './extract'
@@ -77,7 +77,8 @@ describe('instagram response fixtures', () => {
     const paused = applyAccountOutcome(saved.job, 'bob', { followers: null, posts: [], thrown: http429 }, new Set(), 11)
     expect(paused.type).toBe('pause')
     expect(paused.job.index).toBe(1)
-    expect(paused.job.note).toContain('HTTP 429')
+    expect(paused.job.note).toBe(SLOWDOWN_MESSAGE)
+    expect(paused.job.cooldownUntil).toBe(11 + SLOWDOWN_MS)
     const textOnly = applyAccountOutcome(saved.job, 'bob', { followers: null, posts: [], thrown: rateLimitBody.message }, new Set(), 11)
     expect(textOnly.type).toBe('saved')
     if (textOnly.type !== 'saved') return
@@ -94,7 +95,8 @@ describe('instagram response fixtures', () => {
     expect(limited.job.index).toBe(1)
     expect(limited.job.status).toBe('paused')
     expect(limited.job.accounts).toHaveLength(1)
-    expect(limited.job.note).toContain('feedback_required')
+    expect(limited.job.note).toBe(SLOWDOWN_MESSAGE)
+    expect(resumeJob(limited.job, 11 + 60_000).status).toBe('paused')
 
     const denied = applyAccountOutcome(
       { ...limited.job, status: 'running' },

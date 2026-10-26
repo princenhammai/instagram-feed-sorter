@@ -3,7 +3,7 @@ import { instagramIdToMs, shortcodeToId } from './ids'
 import { extractItems, extractNext, extractUserId, extractUsers } from './extract'
 import { normalizeMedia } from './normalize'
 import { collectPosts } from './collect'
-import { findUserIdInText } from './page-data'
+import { findUserIdInText, parseFollowerCount } from './page-data'
 import { samplePost } from '../sample'
 
 describe('instagram ids', () => {
@@ -14,6 +14,15 @@ describe('instagram ids', () => {
     const year = new Date(instagramIdToMs('3000000000000000000')).getUTCFullYear()
     expect(year).toBeGreaterThan(2018)
     expect(year).toBeLessThan(2028)
+  })
+})
+
+describe('parseFollowerCount', () => {
+  it('reads the header and the compact counts', () => {
+    expect(parseFollowerCount('1,234 followers')).toBe(1234)
+    expect(parseFollowerCount('1.2M followers, 56 following')).toBe(1_200_000)
+    expect(parseFollowerCount('12K Followers')).toBe(12_000)
+    expect(parseFollowerCount('no count here')).toBeNull()
   })
 })
 

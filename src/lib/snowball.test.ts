@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { SLOWDOWN_MESSAGE, SLOWDOWN_MS } from './batch'
 import { samplePost } from './sample'
 import {
   applyCandidates,
@@ -12,6 +13,7 @@ import {
   plan,
   provenanceText,
   resumeSnowball,
+  slowdownSnowball,
   snowballAccountTable,
   type IncomingCandidate,
   type SearchHit,
@@ -207,6 +209,19 @@ describe('snowball graph', () => {
     const nextDay = plan(resumeSnowball(capped.job, DAY + 86_400_000), DAY + 86_400_000)
     expect(nextDay.step).toMatchObject({ type: 'score', username: 'bob' })
     expect(nextDay.job.scoredToday).toBe(0)
+  })
+
+  it('refuses resume until the slowdown cooldown ends', () => {
+    const job = slowdownSnowball(createSnowball(['ada'], {}, DAY), DAY)
+    expect(job.note).toBe(SLOWDOWN_MESSAGE)
+    expect(job.cooldownUntil).toBe(DAY + SLOWDOWN_MS)
+    const blocked = resumeSnowball(job, DAY + 60_000)
+    expect(blocked.status).toBe('paused')
+    expect(blocked.note).toBe(SLOWDOWN_MESSAGE)
+    expect(plan(blocked, DAY + 60_000).step.type).toBe('pause')
+    const ready = resumeSnowball(job, DAY + SLOWDOWN_MS)
+    expect(ready.status).toBe('running')
+    expect(plan(ready, DAY + SLOWDOWN_MS).step).toMatchObject({ type: 'score', username: 'ada' })
   })
 
   it('keeps a paused queue so a reload can resume the same account', () => {

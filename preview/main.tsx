@@ -72,10 +72,17 @@ function Screen({ which }: { which: 'seed' | 'results' }) {
             onMode={() => undefined}
             running={false}
             paused
-            progress="Snowball paused · Depth 0 · 1/20 STRONG · 1/40 today"
-            alert="HTTP 429 from Instagram. feedback_required"
+            progress="Snowball paused · Depth 1 · 5 STRONG · expanded 1/20 · 8/25 today"
+            keywordAccounts="@ada, @bea"
+            alert="Instagram asked us to slow down — wait at least a few hours"
             status=""
-            rows={[]}
+            grades={[
+              { username: 'ada', grade: 'STRONG', depth: 0 },
+              { username: 'bea', grade: 'MAYBE', depth: 0 },
+              { username: 'cara', grade: 'WEAK', depth: 1 },
+            ]}
+            resumeLocked
+            rows={visible}
             shown={0}
             sort="median"
             onSort={() => undefined}

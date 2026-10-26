@@ -90,7 +90,7 @@ interface Raw {
   display_url?: string
   thumbnail_url?: string
   thumbnail_src?: string
-  caption?: string | { text?: string } | null
+  caption?: string | { text?: string; user?: { username?: string } } | null
   user?: { username?: string }
   owner?: { username?: string }
   image_versions2?: { candidates?: ImageCandidate[] }
@@ -187,12 +187,18 @@ export function normalizeMedia(raw: unknown, fallbackUsername = ''): Post | null
   const carousel = Array.isArray(media.carousel_media) && media.carousel_media.length > 0
   const slides = carousel ? slidesOf(media.carousel_media ?? []) : []
   const videoUrl = carousel ? null : bestVideo(media)
+  const clip =
+    media.product_type === 'clips' ||
+    media.product_type === 'igtv' ||
+    media.product_type === 'reel' ||
+    media.product_type === 'clips_preview'
   let mediaKind: MediaKind = 'image'
   if (carousel && slides.length > 0) mediaKind = 'carousel'
-  else if (videoUrl || media.media_type === 2) mediaKind = 'video'
+  else if (videoUrl || media.media_type === 2 || clip) mediaKind = 'video'
 
-  const reel = media.product_type === 'clips' || media.product_type === 'igtv' || mediaKind === 'video'
-  const username = media.user?.username || media.owner?.username || fallbackUsername || ''
+  const reel = clip || mediaKind === 'video'
+  const captionUser = media.caption && typeof media.caption === 'object' ? media.caption.user?.username : ''
+  const username = media.user?.username || media.owner?.username || captionUser || fallbackUsername || ''
 
   return {
     id,

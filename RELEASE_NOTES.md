@@ -1,3 +1,37 @@
+# Instagram Feed Sorter v0.4.7
+
+Later pages of a Reels grid count. A short `items` list no longer hides the clips on that page, nearby media ids stay distinct, and a clip without `media_type` still counts as a reel. A profile the tab is already on is not requested with `web_profile_info`. HTTP 429 or `feedback_required` stops the batch or snowball, saves it, and shows “Instagram asked us to slow down — wait at least a few hours”. Resume stays off for four hours. Accounts wait a random 8–20 seconds, and the daily cap defaults to 25. The research panel scrolls, and snowball shows STRONG, MAYBE, or WEAK with depth. Still read-only. No new paid service and no Instagram writes.
+
+## Install the extension
+
+Download **instagram-feed-sorter-v0.4.7.zip** and **SHA256SUMS.txt**. From the folder that contains both, run `sha256sum -c SHA256SUMS.txt`. Extract the extension zip, then use Developer mode → Load unpacked in desktop Chrome or Edge. Select the folder that contains `manifest.json`. The manifest version is **0.4.7**. Sign in to Instagram yourself and open a profile's Reels tab. Reload the extension after replacing an older unpacked folder, then refresh Instagram.
+
+No Node.js, API key, or server is needed for sorting, batching, snowball research, or file export. This is a desktop Chromium build.
+
+## Install the video breakdown CLI
+
+Download **instagram-feed-sorter-breakdown-v0.4.7.zip**. It contains `breakdown.py`, `requirements.txt`, and `INSTALL.md`. ffmpeg and ffprobe are required. tesseract and faster-whisper are optional and free. Follow `INSTALL.md` inside the zip. This script is experimental.
+
+## Quickstart
+
+- **Research panel.** On an Instagram tab, choose Research. The panel scrolls. Paste handles. Snowball also has a Keywords field, plus Max to expand (20) and Max depth (2). Set Reels per account. Run Batch or Snowball. Snowball lists each account as STRONG, MAYBE, or WEAK with its depth, then the reels table. Export, Download top 10, and Sync are one click.
+- **Slow down.** HTTP 429 or `feedback_required` stops the run and asks you to wait at least a few hours. Resume stays disabled for four hours. Accounts are spaced 8–20 seconds apart. The daily cap defaults to 25 scored accounts.
+- **Grid pages.** Three paginated responses in the test fixture all count, including a page whose `items` array is only a decoy and a page whose media ids would collapse in `JSON.parse`.
+- **Request log.** Each account line shows the HTTP status, URL, reel count, and pages fetched.
+- **Account finder.** On a profile or Reels tab, Find accounts stays on the right.
+- **Sheets and Notion.** Options page. Both stay off until you enable them.
+- **Video breakdown.** Download top N, then `python3 breakdown.py "rank01_ada_AbC.mp4" --out breakdowns --whisper-model tiny`.
+
+## Included
+
+- Grid responses are walked in full. Shortcodes are the capture key. Media ids of 16 digits or more are kept as strings. `product_type` `clips` counts as a video when `media_type` is missing. An empty username on the open profile uses that profile.
+- The open profile is not fetched with `web_profile_info`. Followers come from the page's own responses or the profile header.
+- A rate limit pauses batch and snowball, persists the job, and blocks Resume until the cooldown ends.
+- The snowball panel shows grade and depth, and the panel itself scrolls to the reels table.
+- v0.4.6, below, is included.
+
+For updates, replace files in the same loaded folder, reload the extension, then refresh Instagram. Check `SHA256SUMS.txt` against every asset on this release. A folder that still says manifest 0.4.6 is an older build.
+
 # Instagram Feed Sorter v0.4.6
 
 Batch and snowball keep the reels from the first response, scroll the last reel tile into view, and wait for the next page before counting a round as quiet. Ten quiet rounds, or a time limit of 90 seconds or 3 seconds per target reel (at most 5 minutes), end an account. The request log includes the pages fetched. Snowball scores every seed and keyword account, then expands STRONG accounts up to Max to expand and through max depth. The daily cap is the total scored-account limit. Still read-only. No new paid service and no Instagram writes.

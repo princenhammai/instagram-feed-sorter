@@ -55,6 +55,8 @@ export function ResearchPanel({
   onDownload,
   onSync,
   busy,
+  grades = [],
+  resumeLocked = false,
 }: {
   seeds: string
   onSeeds: (value: string) => void
@@ -90,6 +92,8 @@ export function ResearchPanel({
   onDownload: () => void
   onSync: () => void
   busy: '' | 'export' | 'download' | 'sync'
+  grades?: { username: string; grade: string; depth: number }[]
+  resumeLocked?: boolean
 }) {
   const visible = rows.slice(0, VISIBLE_CAP)
   return (
@@ -202,8 +206,8 @@ export function ResearchPanel({
       </div>
       <p className="note">
         {mode === 'batch'
-          ? 'Reads each profile’s Reels grid the same way Sort does, 1.2s apart. A run that finds no reels stays paused instead of exporting an empty file. Only HTTP 429 or feedback_required pauses for rate limiting.'
-          : 'Keywords open the search page and read the accounts in the results, up to 15 each, with provenance search: keyword. Those handles are listed here. Max to expand is how many STRONG accounts are opened to discover more, after every seed and keyword account is scored. Expansion then runs until that many are opened or max depth is reached. The daily cap is the total scored-account limit.'}
+          ? 'Reads each profile’s Reels grid the same way Sort does, with a random 8–20 second wait between accounts. A run that finds no reels stays paused instead of exporting an empty file. HTTP 429 or feedback_required stops the run. Resume stays off for a few hours.'
+          : 'Keywords open the search page and read the accounts in the results, up to 15 each, with provenance search: keyword. Those handles are listed here. Max to expand is how many STRONG accounts are opened to discover more, after every seed and keyword account is scored. Expansion then runs until that many are opened or max depth is reached. The daily cap is 25 scored accounts. Each account waits 8–20 seconds. HTTP 429 or feedback_required stops the run until the cooldown ends.'}
       </p>
 
       <div className="row">
@@ -217,7 +221,7 @@ export function ResearchPanel({
           </button>
         )}
         {paused && (
-          <button type="button" className="primary" onClick={onResume}>
+          <button type="button" className="primary" disabled={resumeLocked} onClick={onResume}>
             Resume
           </button>
         )}
@@ -237,6 +241,32 @@ export function ResearchPanel({
         </p>
       )}
       {status && !alert && <p className="research-ok">{status}</p>}
+
+      {grades.length > 0 && (
+        <div className="research-results">
+          <p className="note">{grades.length} accounts</p>
+          <div className="research-scroll research-grades">
+            <table>
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th>Grade</th>
+                  <th>Depth</th>
+                </tr>
+              </thead>
+              <tbody>
+                {grades.map((row) => (
+                  <tr key={`${row.depth}-${row.username}`}>
+                    <td>@{row.username}</td>
+                    <td>{row.grade}</td>
+                    <td>{row.depth}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="research-log">
         <p className="kicker">Request log</p>

@@ -433,7 +433,13 @@ input:focus, select:focus { outline: 1px solid var(--accent); border-color: tran
 }
 .page-tools { right: 16px; bottom: 16px; display: flex; gap: 8px; }
 .research { pointer-events: auto; position: fixed; z-index: 12; left: 16px; top: 72px; }
-.research.open { top: 12px; bottom: 12px; }
+.research.open {
+  top: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 24px);
+}
 .research-wrap {
   display: flex;
   flex-direction: column;
@@ -445,8 +451,14 @@ input:focus, select:focus { outline: 1px solid var(--accent); border-color: tran
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
   overflow: hidden;
 }
-.research-close { align-self: flex-end; margin: 8px 8px 0; }
+.research.open .research-wrap {
+  height: calc(100vh - 24px);
+  max-height: calc(100vh - 24px);
+  min-height: 0;
+}
+.research-close { align-self: flex-end; margin: 8px 8px 0; flex: none; }
 .research-panel { display: flex; flex-direction: column; gap: 10px; min-height: 0; padding: 0 14px 14px; overflow: auto; }
+.research.open .research-panel { flex: 1 1 auto; overflow-y: auto; }
 .research-head h2 { margin: 0; font-size: 20px; letter-spacing: -0.03em; }
 .research-seeds { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
 .research-seeds textarea {
@@ -469,6 +481,7 @@ input:focus, select:focus { outline: 1px solid var(--accent); border-color: tran
 .research-error { background: rgba(240, 122, 110, 0.14); color: var(--danger); }
 .research-results { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
 .research-scroll { overflow: auto; max-height: 280px; border: 1px solid var(--line); border-radius: 10px; }
+.research-grades { max-height: none; }
 .research-panel table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .research-panel th, .research-panel td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
 .research-panel th { position: sticky; top: 0; background: var(--panel); }

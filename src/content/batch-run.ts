@@ -13,12 +13,14 @@ import {
   batchFreshTable,
   batchReelTable,
   batchSummaryTable,
+  accountGapMs,
   createJob,
   currentHandle,
   isBatchJob,
   mergeSeen,
   isRateLimited,
   pauseJob,
+  SLOWDOWN_MESSAGE,
   progressLabel,
   reelsUrl,
   resumeJob,
@@ -214,7 +216,7 @@ async function runOnce(): Promise<void> {
     batch: progressLabel(existing, 0),
   })
   await saveProgress(progressLabel(existing, 0))
-  if (!(await pause(existing.delayMs, signal))) return
+  if (!(await pause(accountGapMs(), signal))) return
   const latest = await loadJob()
   if (!latest || latest.status !== 'running') return
 
@@ -250,7 +252,8 @@ async function runOnce(): Promise<void> {
     recordTrace({ url: location.href, status: trace.status, snippet: trace.snippet })
     try {
       followers = await followerCount(handle)
-    } catch {
+    } catch (error) {
+      if (isRateLimited(humanError(error))) throw error
       followers = null
     }
     const fresh = await loadJob()
@@ -281,9 +284,8 @@ async function settle(decision: AccountDecision): Promise<void> {
     patch({ phase: { type: 'idle' }, batch: null })
     await saveProgress(null)
     if (decision.message === 'Paused.') notify('Batch paused. Resume it from the research panel.')
-    else if (isRateLimited(decision.message)) {
-      notify(`${decision.message} Resume the batch from the research panel when Instagram has calmed down.`)
-    } else notify(`${decision.message} Resume the batch from the research panel.`)
+    else if (decision.message === SLOWDOWN_MESSAGE) notify(SLOWDOWN_MESSAGE)
+    else notify(`${decision.message} Resume the batch from the research panel.`)
     return
   }
   const account = decision.job.accounts[decision.job.accounts.length - 1]

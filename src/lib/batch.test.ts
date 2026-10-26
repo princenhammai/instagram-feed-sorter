@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  accountGapMs,
   accountGroups,
   applyAccountOutcome,
+  SLOWDOWN_MESSAGE,
+  SLOWDOWN_MS,
   batchFreshTable,
   batchReelTable,
   batchSummaryTable,
@@ -73,6 +76,18 @@ describe('batch scores', () => {
   })
 })
 
+describe('account pacing', () => {
+  it('waits a random 8 to 20 seconds between accounts', () => {
+    expect(accountGapMs(() => 0)).toBe(8_000)
+    expect(accountGapMs(() => 0.999999)).toBe(20_000)
+    for (let step = 0; step < 20; step += 1) {
+      const gap = accountGapMs(() => step / 20)
+      expect(gap).toBeGreaterThanOrEqual(8_000)
+      expect(gap).toBeLessThanOrEqual(20_000)
+    }
+  })
+})
+
 describe('batch outcomes', () => {
   const ada = samplePost({ id: 'a', username: 'ada', shortcode: 'AbC', views: 100, likes: 10, comments: 1, caption: '#fyp\nSave this hook' })
   const bob = samplePost({ id: 'b', username: 'bob', shortcode: 'XyZ', views: 50, likes: 5, comments: 0 })
@@ -94,8 +109,14 @@ describe('batch outcomes', () => {
     expect(limited.type).toBe('pause')
     expect(limited.job.index).toBe(1)
     expect(limited.job.accounts.map((account) => account.username)).toEqual(['ada'])
+    expect(limited.job.note).toBe(SLOWDOWN_MESSAGE)
+    expect(limited.job.cooldownUntil).toBe(3 + SLOWDOWN_MS)
     expect(currentHandle(limited.job)).toBeNull()
-    const resumed = resumeJob(limited.job, 4)
+    const blocked = resumeJob(limited.job, 4)
+    expect(blocked.status).toBe('paused')
+    expect(blocked.note).toBe(SLOWDOWN_MESSAGE)
+    expect(currentHandle(blocked)).toBeNull()
+    const resumed = resumeJob(limited.job, 3 + SLOWDOWN_MS)
     expect(resumed.status).toBe('running')
     expect(currentHandle(resumed)).toBe('bob')
     const empty = applyAccountOutcome(resumed, 'bob', { followers: null, posts: [], interrupted: 'No reels came back. The account may be private.' }, new Set(), 5)

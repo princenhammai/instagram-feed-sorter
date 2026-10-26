@@ -3,7 +3,7 @@ import { collectGridReels } from './capture-reels'
 import { collectSearchAccounts } from './capture-search'
 import { recordTrace } from './request-log'
 import { notify, patch } from './store'
-import { isRateLimited, reelsUrl } from '../lib/batch'
+import { accountGapMs, isRateLimited, reelsUrl, SLOWDOWN_MESSAGE } from '../lib/batch'
 import { humanError } from '../lib/format'
 import { downloadName, safeSegment } from '../lib/media-files'
 import { isKeywordSearchPage, keywordSearchUrl, searchCaptureNote } from '../lib/page-accounts'
@@ -22,6 +22,7 @@ import {
   plan,
   progressLabel,
   resumeSnowball,
+  slowdownSnowball,
   snowballAccountTable,
   snowballCsv,
   snowballQueueTable,
@@ -249,7 +250,7 @@ async function runOnce(): Promise<void> {
         scrolling: false,
       },
     })
-    if (!(await pause(planned.job.settings.delayMs, signal))) return
+    if (!(await pause(accountGapMs(), signal))) return
     const latest = await loadSnowball()
     if (!latest || latest.status !== 'running') return
     if (signal.aborted) return
@@ -283,7 +284,8 @@ async function runOnce(): Promise<void> {
       })
       try {
         followers = await followerCount(username)
-      } catch {
+      } catch (error) {
+        if (isRateLimited(humanError(error))) throw error
         followers = null
       }
       if (signal.aborted) {
@@ -303,8 +305,9 @@ async function runOnce(): Promise<void> {
       }
       const message = humanError(error)
       if (isRateLimited(message)) {
-        await saveSnowball(pauseSnowball(latest, message))
-        notify(`${message} Resume the snowball from the research panel when Instagram has calmed down.`)
+        await saveSnowball(slowdownSnowball(latest))
+        patch({ phase: { type: 'idle' } })
+        notify(SLOWDOWN_MESSAGE)
         return
       }
       await saveSnowball(applyScore(latest, { username, followers, posts: [], error: message }))
@@ -350,8 +353,9 @@ async function runOnce(): Promise<void> {
   } catch (error) {
     const message = humanError(error)
     if (signal.aborted || isRateLimited(message)) {
-      await saveSnowball(pauseSnowball(latest, signal.aborted ? 'Paused.' : message))
-      if (!signal.aborted) notify(`${message} Resume the snowball from the research panel when Instagram has calmed down.`)
+      await saveSnowball(signal.aborted ? pauseSnowball(latest, 'Paused.') : slowdownSnowball(latest))
+      patch({ phase: { type: 'idle' } })
+      if (!signal.aborted) notify(SLOWDOWN_MESSAGE)
       return
     }
     await saveSnowball(markExpanded(applyCandidates(latest, username, incoming), username))

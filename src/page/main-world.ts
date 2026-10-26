@@ -1,9 +1,9 @@
 import { extractFollowerCounts, extractItems, extractSearchUsers, extractUserId, extractUsers } from '../lib/instagram/extract'
 import { requestMatchesKeyword } from '../lib/page-accounts'
 import { hashtagUrl } from '../lib/instagram/search'
-import { isInstagramDataUrl, mergePost, parseBodies } from '../lib/instagram/capture'
+import { isInstagramDataUrl, parseBodies, rememberPosts } from '../lib/instagram/capture'
 import { normalizeMedia } from '../lib/instagram/normalize'
-import { findUserIdInText, hasFeedbackRequired, HttpError, httpFailureMessage, responseSnippet } from '../lib/instagram/page-data'
+import { findUserIdInText, hasFeedbackRequired, HttpError, httpFailureMessage, parseFollowerCount, responseSnippet } from '../lib/instagram/page-data'
 import type { Post, SimilarAccount } from '../lib/types'
 import { ISO_SOURCE, MAIN_SOURCE, type MainCall } from '../lib/protocol'
 
@@ -41,17 +41,8 @@ function headers(): Record<string, string> {
   }
 }
 
-const RETRY_DELAYS = [2000, 5000, 10000]
-
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-function retryAfterMs(response: Response): number | null {
-  const header = response.headers.get('retry-after')
-  if (!header) return null
-  const seconds = Number(header)
-  return Number.isFinite(seconds) ? Math.min(seconds * 1000, 30000) : null
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -78,22 +69,17 @@ function reportTrace(url: string, status: number, snippet: string): void {
   )
 }
 
-async function igFetch(url: string, init: RequestInit = {}, retries = RETRY_DELAYS.length): Promise<unknown> {
-  for (let attempt = 0; ; attempt += 1) {
-    const response = await fetch(url, {
-      credentials: 'include',
-      ...init,
-      headers: { ...headers(), ...(init.headers as Record<string, string> | undefined) },
-    })
-    const text = await response.text()
-    const snippet = responseSnippet(text) || (response.ok ? 'ok' : '')
-    reportTrace(url, response.status, snippet)
-    const feedback = hasFeedbackRequired(text)
-    if (response.status === 429 && !feedback && attempt < retries) {
-      await wait(retryAfterMs(response) ?? RETRY_DELAYS[attempt])
-      continue
-    }
-    if (response.status === 401 || response.status === 403) {
+async function igFetch(url: string, init: RequestInit = {}): Promise<unknown> {
+  const response = await fetch(url, {
+    credentials: 'include',
+    ...init,
+    headers: { ...headers(), ...(init.headers as Record<string, string> | undefined) },
+  })
+  const text = await response.text()
+  const snippet = responseSnippet(text) || (response.ok ? 'ok' : '')
+  reportTrace(url, response.status, snippet)
+  const feedback = hasFeedbackRequired(text)
+  if (response.status === 401 || response.status === 403) {
       throw new HttpError(
         `${httpFailureMessage(response.status, text)} Refresh the page and make sure you are signed in.`,
         response.status,
@@ -101,18 +87,21 @@ async function igFetch(url: string, init: RequestInit = {}, retries = RETRY_DELA
         snippet,
       )
     }
-    if (!response.ok || feedback) throw new HttpError(httpFailureMessage(response.status, text), response.status, url, snippet)
-    try {
-      return JSON.parse(text) as unknown
-    } catch {
-      throw new HttpError(
-        'Instagram returned a page instead of post data. Refresh and try again.',
-        response.status,
-        url,
-        snippet || 'Instagram returned HTML instead of JSON.',
-      )
-    }
+  if (!response.ok || feedback) throw new HttpError(httpFailureMessage(response.status, text), response.status, url, snippet)
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    throw new HttpError(
+      'Instagram returned a page instead of post data. Refresh and try again.',
+      response.status,
+      url,
+      snippet || 'Instagram returned HTML instead of JSON.',
+    )
   }
+}
+
+function hardLimit(error: unknown): boolean {
+  return error instanceof HttpError && (error.status === 429 || /feedback_required/i.test(error.message))
 }
 
 function userIdFromPage(username: string): string | undefined {
@@ -161,6 +150,8 @@ async function profile(username: string): Promise<unknown> {
     userIds.set(username.toLowerCase(), known)
     return { data: { user: { id: known } } }
   }
+  // The open profile page already has this account. Do not ask web_profile_info for it.
+  if (viewingProfile(username)) return { data: { user: {} } }
   const raw = await webProfile(username)
   ingest(raw)
   return raw
@@ -194,7 +185,7 @@ function relatedInDocument(): SimilarAccount[] {
 }
 
 function fetchOnce(url: string): Promise<unknown> {
-  return withTimeout(igFetch(url, {}, 0), 8000)
+  return withTimeout(igFetch(url), 8000)
 }
 
 function viewingProfile(username: string): boolean {
@@ -211,9 +202,11 @@ async function similarTo(username: string): Promise<SimilarAccount[]> {
   let id = cachedUserId(username) || (viewingProfile(username) ? await waitForPageId(username) : undefined)
   let lastError: unknown
   let profilePayload: unknown = null
+  if (!id && viewingProfile(username)) return exceptTarget(username, relatedInDocument())
   if (!id) {
     profilePayload = await webProfile(username).catch((error: unknown) => {
       lastError = error
+      if (hardLimit(error)) throw error
       return null
     })
   }
@@ -235,6 +228,7 @@ async function similarTo(username: string): Promise<SimilarAccount[]> {
   let sawResponse = false
   for (const url of urls) {
     const raw = await fetchOnce(url).catch((error: unknown) => {
+      if (hardLimit(error)) throw error
       lastError = error
       return null
     })
@@ -435,11 +429,35 @@ function rememberIds(raw: unknown): void {
   walk(raw, 0)
 }
 
-function ingest(raw: unknown): void {
-  for (const item of extractItems(raw, 80)) {
-    const post = normalizeMedia(item)
-    if (post) captured.set(post.id, mergePost(captured.get(post.id), post))
+function openProfileUsername(): string {
+  const parts = location.pathname.split('/').filter(Boolean)
+  const first = parts[0] || ''
+  if (!/^[A-Za-z0-9._]{1,30}$/.test(first)) return ''
+  const reserved = new Set(['explore', 'reels', 'reel', 'p', 'stories', 'accounts', 'direct', 'about', 'legal'])
+  if (reserved.has(first.toLowerCase())) return ''
+  const second = (parts[1] || '').toLowerCase()
+  if (parts.length === 1 || second === 'reels') return first
+  return ''
+}
+
+function followersFromDom(): number | null {
+  const bits: string[] = []
+  const meta = document.querySelector('meta[property="og:description"], meta[name="description"]')
+  const content = meta?.getAttribute('content')
+  if (content) bits.push(content)
+  const header = document.querySelector('header')
+  if (header?.textContent) bits.push(header.textContent)
+  const link = document.querySelector('a[href*="/followers/"]')
+  if (link?.textContent) bits.push(`${link.textContent} followers`)
+  for (const bit of bits) {
+    const count = parseFollowerCount(bit)
+    if (count != null) return count
   }
+  return null
+}
+
+function ingest(raw: unknown): void {
+  rememberPosts(captured, raw, openProfileUsername())
   for (const account of extractUsers(raw)) {
     const key = account.username.toLowerCase()
     const existing = capturedAccounts.get(key)
@@ -450,9 +468,16 @@ function ingest(raw: unknown): void {
 }
 
 async function followingPage(username: string, maxId?: string): Promise<unknown> {
-  const info = await profile(username)
-  const id = extractUserId(info)
-  if (!id) throw new HttpError('Instagram did not return that profile.', 404)
+  let id: string | undefined
+  if (viewingProfile(username)) {
+    scanEmbedded()
+    id = cachedUserId(username) || (await waitForPageId(username))
+    if (!id) return { users: [] }
+  } else {
+    const info = await profile(username)
+    id = extractUserId(info)
+    if (!id) throw new HttpError('Instagram did not return that profile.', 404)
+  }
   const url = new URL(`https://www.instagram.com/api/v1/friendships/${encodeURIComponent(id)}/following/`)
   url.searchParams.set('count', '12')
   if (maxId) url.searchParams.set('max_id', maxId)
@@ -465,9 +490,15 @@ async function followers(username: string): Promise<number | null> {
   scanEmbedded()
   const known = followerCounts.get(key)
   if (known != null) return known
+  if (viewingProfile(username)) {
+    const fromDom = followersFromDom()
+    if (fromDom != null) followerCounts.set(key, fromDom)
+    return fromDom
+  }
   try {
     ingest(await webProfile(username))
-  } catch {
+  } catch (error) {
+    if (hardLimit(error)) throw error
     return null
   }
   return followerCounts.get(key) ?? null

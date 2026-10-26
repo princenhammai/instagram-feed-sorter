@@ -1,4 +1,4 @@
-import { clampDelay, compactReel, type StoredReel } from './batch'
+import { clampDelay, compactReel, cooldownActive, SLOWDOWN_MESSAGE, SLOWDOWN_MS, type StoredReel } from './batch'
 import { tableToCsv } from './export'
 import { withEngagement } from './outlier'
 import { median, withResearch } from './research'
@@ -13,7 +13,7 @@ export const DEFAULT_SUGGESTED_CAP = 20
 export const DEFAULT_TARGET_STRONG = 20
 export const DEFAULT_MAX_DEPTH = 2
 export const DEFAULT_MIN_STRONG_RATIO = 0.2
-export const DEFAULT_DAILY_CAP = 40
+export const DEFAULT_DAILY_CAP = 25
 export const DEFAULT_STRONG_BREAKOUTS = 2
 export const DEFAULT_STRONG_MEDIAN = 10_000
 export const DEFAULT_MAYBE_BREAKOUTS = 1
@@ -94,6 +94,8 @@ export interface SnowballJob {
   keywords: string[]
   searched: string[]
   searchNote?: string
+  /** Resume stays disabled until this time after Instagram asks us to slow down. */
+  cooldownUntil?: number
   updatedAt: number
 }
 
@@ -276,9 +278,17 @@ export function pauseSnowball(job: SnowballJob, note?: string, now = Date.now())
   return { ...job, status: 'paused', note: note || job.note, updatedAt: now }
 }
 
+export function slowdownSnowball(job: SnowballJob, now = Date.now()): SnowballJob {
+  return { ...job, status: 'paused', note: SLOWDOWN_MESSAGE, cooldownUntil: now + SLOWDOWN_MS, updatedAt: now }
+}
+
 export function resumeSnowball(job: SnowballJob, now = Date.now()): SnowballJob {
   if (job.status === 'done') return { ...job, updatedAt: now }
-  return { ...refreshDay(job, now), status: 'running', note: undefined, updatedAt: now }
+  if (cooldownActive(job.cooldownUntil, now)) {
+    return { ...job, status: 'paused', note: SLOWDOWN_MESSAGE, updatedAt: now }
+  }
+  const ready = job.cooldownUntil ? { ...job, cooldownUntil: undefined } : job
+  return { ...refreshDay(ready, now), status: 'running', note: undefined, updatedAt: now }
 }
 
 function finishSnowball(job: SnowballJob, note: string, now: number): SnowballJob {

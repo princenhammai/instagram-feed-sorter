@@ -10,7 +10,9 @@ import {
   BATCH_PROGRESS_KEY,
   DEFAULT_DELAY_MS,
   DEFAULT_REELS,
+  SLOWDOWN_MESSAGE,
   clampReels,
+  cooldownActive,
   batchSummaryTable,
   parseHandles,
   reelsUrl,
@@ -282,9 +284,13 @@ export function ResearchDock() {
     setAlert('')
     setStatus('')
     if (mode === 'snowball') {
+      if (cooldownActive(snowJob?.cooldownUntil)) {
+        setAlert(SLOWDOWN_MESSAGE)
+        return
+      }
       const job = await markSnowballResumed()
-      if (!job || job.status === 'done') {
-        setAlert('No paused snowball to resume.')
+      if (!job || job.status !== 'running') {
+        setAlert(job?.note || 'No paused snowball to resume.')
         return
       }
       const planned = plan(job)
@@ -296,9 +302,13 @@ export function ResearchDock() {
       void resumeSnowballRun()
       return
     }
+    if (cooldownActive(batchJob?.cooldownUntil)) {
+      setAlert(SLOWDOWN_MESSAGE)
+      return
+    }
     const job = await markResumed()
-    if (!job || job.status === 'done') {
-      setAlert('No paused batch to resume.')
+    if (!job || job.status !== 'running') {
+      setAlert(job?.note || 'No paused batch to resume.')
       return
     }
     const handle = job.handles[job.index]
@@ -485,6 +495,18 @@ export function ResearchDock() {
           paidHidden={paidHidden}
           onRun={() => void run()}
           onPause={() => void pause()}
+          grades={
+            mode === 'snowball' && snowJob
+              ? snowJob.accounts.map((account) => ({
+                  username: account.username,
+                  grade: account.grade,
+                  depth: account.depth,
+                }))
+              : []
+          }
+          resumeLocked={Boolean(
+            paused && cooldownActive(mode === 'batch' ? batchJob?.cooldownUntil : snowJob?.cooldownUntil),
+          )}
           onResume={() => void resume()}
           onExport={() => void exportRows()}
           onDownload={() => void downloadTop()}
