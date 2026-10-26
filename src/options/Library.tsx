@@ -13,7 +13,9 @@ import {
   type SavedPost,
 } from '../lib/db'
 import { exportColumns, toCsv } from '../lib/export'
+import { confirmChromeDownload, describeSavedFile } from '../lib/file-download'
 import { downloadName, postFileBase, safeSegment } from '../lib/media-files'
+import { withResearch } from '../lib/research'
 import { formatCount, formatDay } from '../lib/format'
 
 export function Library() {
@@ -35,12 +37,6 @@ export function Library() {
   }, [])
 
   const folder = folders.find((item) => item.id === folderId)
-
-  async function download(filename: string, blob: Blob) {
-    const url = URL.createObjectURL(blob)
-    await chrome.downloads.download({ url, filename: downloadName(filename), conflictAction: 'uniquify', saveAs: false })
-    setTimeout(() => URL.revokeObjectURL(url), 20_000)
-  }
 
   return (
     <section className="library">
@@ -99,11 +95,11 @@ export function Library() {
             <button
               type="button"
               disabled={posts.length === 0}
-              onClick={() => void download(`${safeSegment(folder?.name || 'library')}.csv`, new Blob([toCsv(exportColumns(), posts.map((item) => item.post))], { type: 'text/csv;charset=utf-8' }))}
+              onClick={() => void exportCsv(posts, folder?.name || 'library', setMessage)}
             >
               Export CSV
             </button>
-            <button type="button" disabled={posts.length === 0} onClick={() => void exportZip(posts, folder?.name || 'library').then(() => setMessage('Library download started.'))}>
+            <button type="button" disabled={posts.length === 0} onClick={() => void exportZip(posts, folder?.name || 'library').then((note) => setMessage(note)).catch((error: unknown) => setMessage(error instanceof Error ? error.message : 'Chrome did not save the zip.'))}>
               Download files
             </button>
           </div>
@@ -150,7 +146,18 @@ function Media({ saved }: { saved: SavedPost }) {
   return saved.video || saved.slides[0]?.kind === 'video' ? <video src={url} controls /> : <img src={url} alt="" />
 }
 
-async function exportZip(posts: SavedPost[], folderName: string) {
+async function exportCsv(posts: SavedPost[], folderName: string, setMessage: (message: string) => void): Promise<void> {
+  setMessage('Saving CSV…')
+  const response = (await chrome.runtime.sendMessage({
+    type: 'DOWNLOAD_TEXT',
+    filename: downloadName(`${safeSegment(folderName)}.csv`),
+    mime: 'text/csv;charset=utf-8',
+    text: toCsv(exportColumns(), withResearch(posts.map((item) => item.post))),
+  })) as { ok?: boolean; error?: string; filename?: string } | undefined
+  setMessage(response?.ok ? `Saved CSV to ${describeSavedFile(response.filename)}.` : response?.error || 'Chrome did not save the CSV.')
+}
+
+async function exportZip(posts: SavedPost[], folderName: string): Promise<string> {
   const zip = new JSZip()
   for (const saved of posts) {
     const base = postFileBase(saved.post)
@@ -162,11 +169,17 @@ async function exportZip(posts: SavedPost[], folderName: string) {
   }
   const blob = await zip.generateAsync({ type: 'blob' })
   const url = URL.createObjectURL(blob)
-  await chrome.downloads.download({
-    url,
-    filename: downloadName(`${safeSegment(folderName)}.zip`),
-    conflictAction: 'uniquify',
-    saveAs: false,
-  })
-  setTimeout(() => URL.revokeObjectURL(url), 20_000)
+  try {
+    const id = await chrome.downloads.download({
+      url,
+      filename: downloadName(`${safeSegment(folderName)}.zip`),
+      conflictAction: 'uniquify',
+      saveAs: false,
+    })
+    const saved = await confirmChromeDownload(id, 60_000)
+    if (!saved.ok) throw new Error(saved.error || 'Chrome did not save the zip.')
+    return `Saved the zip to ${describeSavedFile(saved.filename)}.`
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 120_000)
+  }
 }

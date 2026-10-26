@@ -3,13 +3,18 @@ import { isAllowedMediaUrl } from '../lib/media-files'
 
 let cancel = false
 
-function downloadBlob(blob: Blob, filename: string, saveAs = false): Promise<void> {
+function downloadBlob(blob: Blob, filename: string, saveAs = false): Promise<number> {
   const url = URL.createObjectURL(blob)
-  return chrome.downloads
-    .download({ url, filename, conflictAction: 'uniquify', saveAs })
-    .then(() => {
+  return chrome.downloads.download({ url, filename, conflictAction: 'uniquify', saveAs }).then(
+    (id) => {
       setTimeout(() => URL.revokeObjectURL(url), 120_000)
-    })
+      return id
+    },
+    (error: unknown) => {
+      URL.revokeObjectURL(url)
+      throw error
+    },
+  )
 }
 
 function decodeBase64(value: string): Uint8Array<ArrayBuffer> {
@@ -25,13 +30,13 @@ async function saveFile(message: {
   text?: string
   base64?: string
   saveAs?: boolean
-}): Promise<{ ok: boolean }> {
+}): Promise<{ ok: boolean; id: number }> {
   const blob =
     typeof message.base64 === 'string'
       ? new Blob([decodeBase64(message.base64)], { type: message.mime })
       : new Blob([message.text ?? ''], { type: message.mime })
-  await downloadBlob(blob, message.filename, message.saveAs)
-  return { ok: true }
+  const id = await downloadBlob(blob, message.filename, message.saveAs)
+  return { ok: true, id }
 }
 
 async function saveZip(message: {

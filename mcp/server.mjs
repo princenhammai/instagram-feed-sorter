@@ -7,7 +7,7 @@ import { z } from 'zod'
 
 const PORT = 47331
 const HOST = '127.0.0.1'
-const VERSION = '0.3.2'
+const VERSION = '0.3.3'
 
 const INSTRUCTIONS = `Instagram research through the user's own Chrome window.
 Instagram Feed Sorter must be loaded, and Chrome must be open and signed in to Instagram.
@@ -28,9 +28,9 @@ const sortInput = {
   saved: z.boolean().optional().describe('Read that account’s saved posts. Requires username.'),
   collectionUrl: z.string().optional().describe('Full instagram.com URL of one saved collection.'),
   sort: z
-    .enum(['views', 'likes', 'comments', 'outlier', 'engagement', 'newest', 'oldest'])
+    .enum(['views', 'likes', 'comments', 'outlier', 'engagement', 'duration', 'median', 'likeRate', 'commentRate', 'newest', 'oldest'])
     .optional()
-    .describe('Ranking. Defaults to views for reels and likes otherwise.'),
+    .describe('Ranking. Defaults to views for reels and likes otherwise. median is views divided by the median views of the loaded set. likeRate and commentRate are likes or comments divided by views. duration uses the video length when Instagram included it.'),
   count: z.number().int().min(1).max(100000).optional().describe('How many posts to collect. Defaults to 25.'),
   all: z.boolean().optional().describe('Collect until the profile ends. One profile only, and slower.'),
   since: z.enum(['none', '7d', '30d', '90d', '180d', '365d']).optional().describe('Only posts from this recent window. Profiles only.'),
@@ -358,7 +358,7 @@ async function main() {
     const response = await fetch(`http://${HOST}:${PORT}/health`, { signal: AbortSignal.timeout(3000) })
     const health = await response.json()
     if (health.name !== 'feed-sorter' || health.version !== VERSION) {
-      throw new Error('Port 47331 is occupied by another or older bridge. Restart the existing Feed Sorter MCP process before using version 0.3.2.')
+      throw new Error('Port 47331 is occupied by another or older bridge. Restart the existing Feed Sorter MCP process before using version 0.3.3.')
     }
     console.error('Feed Sorter agent bridge is already running. This process will forward to it.')
   }

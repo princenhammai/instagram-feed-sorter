@@ -45,7 +45,19 @@ describe('parseSurface', () => {
 
 describe('sort limits', () => {
   it('offers every sort, with outlier only on a single profile', () => {
-    expect(allowedSorts(reels)).toEqual(['views', 'likes', 'comments', 'outlier', 'engagement', 'newest', 'oldest'])
+    expect(allowedSorts(reels)).toEqual([
+      'views',
+      'likes',
+      'comments',
+      'outlier',
+      'engagement',
+      'duration',
+      'median',
+      'likeRate',
+      'commentRate',
+      'newest',
+      'oldest',
+    ])
     expect(allowedSorts(posts)).toContain('views')
     expect(allowedSorts(search)).not.toContain('outlier')
     expect(allowedSorts(savedAll)).toContain('comments')

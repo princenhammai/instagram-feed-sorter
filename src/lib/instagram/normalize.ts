@@ -101,6 +101,66 @@ interface Raw {
   edge_liked_by?: { count?: number }
   edge_media_preview_like?: { count?: number }
   edge_media_to_comment?: { count?: number }
+  is_paid_partnership?: boolean
+  sponsor_tags?: unknown[]
+  clips_metadata?: ClipsAudio
+  music_metadata?: ClipsAudio
+  clips_music_attribution_info?: {
+    artist_name?: string
+    song_name?: string
+    uses_original_audio?: boolean
+  }
+}
+
+interface MusicAsset {
+  title?: string
+  display_artist?: string
+}
+
+interface ClipsAudio {
+  video_duration?: number
+  music_info?: { music_asset_info?: MusicAsset }
+  original_sound_info?: {
+    original_audio_title?: string
+    ig_artist?: { username?: string }
+  }
+}
+
+function textField(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function joinTitle(title: string, artist: string): string {
+  if (!title) return ''
+  if (!artist || artist.toLowerCase() === title.toLowerCase()) return title
+  return `${title} — ${artist}`
+}
+
+export function audioLabel(raw: Raw): string | null {
+  const music = raw.clips_metadata?.music_info?.music_asset_info ?? raw.music_metadata?.music_info?.music_asset_info
+  const credited = joinTitle(
+    textField(music?.title) || textField(raw.clips_music_attribution_info?.song_name),
+    textField(music?.display_artist) || textField(raw.clips_music_attribution_info?.artist_name),
+  )
+  if (credited) return credited.slice(0, 180)
+
+  const original = raw.clips_metadata?.original_sound_info ?? raw.music_metadata?.original_sound_info
+  const originalTitle = joinTitle(textField(original?.original_audio_title), textField(original?.ig_artist?.username))
+  if (originalTitle) return originalTitle.slice(0, 180)
+  if (raw.clips_music_attribution_info?.uses_original_audio) {
+    const artist = textField(raw.clips_music_attribution_info.artist_name)
+    return artist ? `Original audio — ${artist}`.slice(0, 180) : 'Original audio'
+  }
+  return null
+}
+
+function paidPartnershipOf(raw: Raw): boolean {
+  if (raw.is_paid_partnership === true) return true
+  return Array.isArray(raw.sponsor_tags) && raw.sponsor_tags.length > 0
+}
+
+function durationOf(raw: Raw): number | null {
+  return asCount(raw.video_duration, raw.clips_metadata?.video_duration)
 }
 
 function slidesOf(items: Raw[]): Slide[] {
@@ -155,7 +215,9 @@ export function normalizeMedia(raw: unknown, fallbackUsername = ''): Post | null
     coverUrl: bestImage(media) || slides.find((slide) => slide.kind === 'image')?.url || null,
     videoUrl,
     slides,
-    duration: asCount(media.video_duration),
+    duration: durationOf(media),
+    audio: audioLabel(media),
+    paidPartnership: paidPartnershipOf(media),
     videoLowUrl: carousel ? null : smallestVideo(media),
   }
 }

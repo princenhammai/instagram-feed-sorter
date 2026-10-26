@@ -16,7 +16,14 @@ export function samplePost(overrides: Partial<Post> = {}): Post {
     videoUrl: overrides.videoUrl === undefined ? 'https://scontent.cdninstagram.com/video.mp4' : overrides.videoUrl,
     slides: overrides.slides ?? [],
     duration: overrides.duration,
+    audio: overrides.audio === undefined ? null : overrides.audio,
+    paidPartnership: overrides.paidPartnership ?? false,
     outlierScore: overrides.outlierScore,
     engagementRate: overrides.engagementRate,
+    medianScore: overrides.medianScore,
+    likeRate: overrides.likeRate,
+    commentRate: overrides.commentRate,
+    likelyPaid: overrides.likelyPaid,
+    paidSignals: overrides.paidSignals,
   }
 }

@@ -13,6 +13,7 @@ export interface FilterState {
   min: number | null
   max: number | null
   posted: PostedFilter
+  hidePaid: boolean
 }
 
 export const EMPTY_FILTERS: FilterState = {
@@ -20,6 +21,7 @@ export const EMPTY_FILTERS: FilterState = {
   min: null,
   max: null,
   posted: { mode: 'none' },
+  hidePaid: false,
 }
 
 const UNIT_MS: Record<TimeUnit, number> = {
@@ -31,6 +33,7 @@ const UNIT_MS: Record<TimeUnit, number> = {
 
 export function applyFilters(posts: Post[], filters: FilterState, now = Date.now()): Post[] {
   return posts.filter((post) => {
+    if (filters.hidePaid && post.likelyPaid) return false
     if (filters.metric && (filters.min != null || filters.max != null)) {
       const value = post[filters.metric]
       if (value == null) return false
@@ -58,6 +61,7 @@ export function metricBounds(posts: Post[], metric: MetricKey): { min: number; m
 }
 
 export function filtersActive(filters: FilterState, posts: Post[]): boolean {
+  if (filters.hidePaid) return true
   if (filters.posted.mode !== 'none') return true
   if (!filters.metric || (filters.min == null && filters.max == null)) return false
   const bounds = metricBounds(posts, filters.metric)

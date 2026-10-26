@@ -16,6 +16,14 @@ function metricOf(post: Post, key: SortKey): number | null | undefined {
       return post.outlierScore
     case 'engagement':
       return post.engagementRate
+    case 'duration':
+      return post.duration
+    case 'median':
+      return post.medianScore
+    case 'likeRate':
+      return post.likeRate
+    case 'commentRate':
+      return post.commentRate
     default:
       return post.likes
   }
@@ -35,7 +43,7 @@ export function searchPosts(posts: Post[], query: string): Post[] {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
   if (terms.length === 0) return posts
   return posts.filter((post) => {
-    const haystack = `${post.caption} ${post.username} ${post.shortcode}`.toLowerCase()
+    const haystack = `${post.caption} ${post.username} ${post.shortcode} ${post.audio ?? ''}`.toLowerCase()
     return terms.every((term) => haystack.includes(term))
   })
 }

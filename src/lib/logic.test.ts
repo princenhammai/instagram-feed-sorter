@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { applyFilters, EMPTY_FILTERS, histogram } from './filters'
 import { boltTiers, computeOutlierScores, engagementRate, withEngagement } from './outlier'
+import { disclosureTags, withResearch } from './research'
 import { searchPosts, sortPosts } from './sort'
 import { exportColumns, toCsv, toTsv } from './export'
 import { parseGoogleJson, sheetUploadBody, spreadsheetUrl } from './sheets'
@@ -102,12 +103,60 @@ describe('engagement rate', () => {
     )
     expect(sortPosts(posts, 'engagement').map((post) => post.id)).toEqual(['b', 'a'])
     expect(sortPosts(posts, 'newest').map((post) => post.id)).toEqual(['b', 'a'])
+    const timed = [
+      samplePost({ id: 'short', duration: 5 }),
+      samplePost({ id: 'long', duration: 40 }),
+      samplePost({ id: 'none', duration: null }),
+    ]
+    expect(sortPosts(timed, 'duration').map((post) => post.id)).toEqual(['long', 'short', 'none'])
   })
 
   it('searches captions with every term', () => {
     const posts = [samplePost({ id: 'a', caption: 'Morning gym routine' }), samplePost({ id: 'b', caption: 'Pasta night' })]
     expect(searchPosts(posts, 'gym morning').map((post) => post.id)).toEqual(['a'])
     expect(searchPosts(posts, '  ')).toHaveLength(2)
+  })
+})
+
+describe('research scores', () => {
+  it('scores views against the median and keeps likes and comments per view', () => {
+    const scored = withResearch([
+      samplePost({ id: 'low', views: 100, likes: 10, comments: 0 }),
+      samplePost({ id: 'mid', views: 300, likes: 3, comments: 3 }),
+      samplePost({ id: 'high', views: 900, likes: 9, comments: 0 }),
+    ])
+    const mid = scored.find((post) => post.id === 'mid')
+    expect(mid?.medianScore).toBe(1)
+    expect(scored.find((post) => post.id === 'high')?.medianScore).toBe(3)
+    expect(mid?.likeRate).toBe(0.01)
+    expect(mid?.commentRate).toBe(0.01)
+    expect(sortPosts(scored, 'median').map((post) => post.id)).toEqual(['high', 'mid', 'low'])
+    expect(sortPosts(scored, 'likeRate').map((post) => post.id)[0]).toBe('low')
+  })
+
+  it('flags disclosure tags, paid-partnership data, and ads with a collapsed like rate', () => {
+    expect(disclosureTags('#adaptive #adult training')).toEqual([])
+    expect(disclosureTags('#AD\n#Sponsored')).toEqual(['#ad', '#sponsored'])
+    const organic = Array.from({ length: 10 }, (_, index) =>
+      samplePost({ id: `o${index}`, views: 1_000_000, likes: 40_000, comments: 500, caption: 'morning routine' }),
+    )
+    const ad = samplePost({
+      id: 'kaiser',
+      views: 30_000_000,
+      likes: 10_000,
+      comments: 200,
+      caption: 'Care that fits. #ad',
+      paidPartnership: true,
+    })
+    const quiet = samplePost({ id: 'new', views: 400, likes: 0, comments: 0, caption: 'just posted' })
+    const scored = withResearch([ad, quiet, ...organic])
+    const flagged = scored.find((post) => post.id === 'kaiser')
+    expect(flagged?.likelyPaid).toBe(true)
+    expect(flagged?.paidSignals).toEqual(expect.arrayContaining(['#ad', 'paid partnership', 'low like rate']))
+    expect(flagged?.medianScore).toBe(30)
+    expect(scored.find((post) => post.id === 'o0')?.likelyPaid).toBe(false)
+    expect(scored.find((post) => post.id === 'new')?.likelyPaid).toBe(false)
+    expect(applyFilters(scored, { ...EMPTY_FILTERS, hidePaid: true }).some((post) => post.id === 'kaiser')).toBe(false)
   })
 })
 
@@ -126,9 +175,29 @@ describe('export columns', () => {
       'Duration (s)',
       'Engagement rate (%)',
       'Outlier score',
+      'Views × median',
+      'Likes / views (%)',
+      'Comments / views (%)',
+      'Audio',
+      'Likely paid',
+      'Paid signals',
     ]) {
       expect(headers).toContain(header)
     }
+    for (const header of ['Duration (s)', 'Engagement rate (%)', 'Outlier score']) {
+      expect(headers.filter((item) => item === header)).toHaveLength(1)
+    }
+  })
+
+  it('writes the research columns once, using the scores already on the post', () => {
+    const [post] = withResearch([
+      samplePost({ views: 200, likes: 10, comments: 2, duration: 12.2, audio: 'Original audio — ada', caption: 'hello #ad' }),
+    ])
+    const row = toCsv(exportColumns(), [post])
+    expect(row).toContain('Original audio — ada')
+    expect(row).toContain('Yes')
+    expect(row).toContain('#ad')
+    expect(row.match(/Duration \(s\)/g)).toHaveLength(1)
   })
 
   it('quotes captions that contain commas', () => {

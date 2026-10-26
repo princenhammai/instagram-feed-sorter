@@ -154,6 +154,7 @@ input:focus, select:focus { outline: 1px solid var(--accent); border-color: tran
   background: var(--panel);
 }
 .search { width: 200px; padding: 6px 10px; border-radius: 999px; }
+.top-n input { width: 4.5rem; }
 .select-bar {
   display: flex;
   gap: 8px;
@@ -206,6 +207,24 @@ input:focus, select:focus { outline: 1px solid var(--accent); border-color: tran
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+.meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.meta-line .paid, .paid-note { color: var(--danger); font-weight: 700; }
+.paid-note { margin: 0; font-size: 13px; }
+.meta-line .audio {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 80px;
 }
 .shot .metric {
   position: absolute;

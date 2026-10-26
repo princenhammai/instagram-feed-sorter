@@ -30,6 +30,12 @@ export function exportColumns(): Column[] {
     { header: 'Duration (s)', value: (post) => round(post.duration, 1) },
     { header: 'Engagement rate (%)', value: (post) => round(post.engagementRate == null ? null : post.engagementRate * 100, 2) },
     { header: 'Outlier score', value: (post) => round(post.outlierScore, 2) },
+    { header: 'Views × median', value: (post) => round(post.medianScore, 2) },
+    { header: 'Likes / views (%)', value: (post) => round(post.likeRate == null ? null : post.likeRate * 100, 2) },
+    { header: 'Comments / views (%)', value: (post) => round(post.commentRate == null ? null : post.commentRate * 100, 2) },
+    { header: 'Audio', value: (post) => post.audio ?? '' },
+    { header: 'Likely paid', value: (post) => (post.likelyPaid ? 'Yes' : 'No') },
+    { header: 'Paid signals', value: (post) => (post.paidSignals && post.paidSignals.length > 0 ? post.paidSignals.join('; ') : '') },
     { header: 'Thumbnail URL', value: (post) => post.coverUrl ?? '' },
     { header: 'Media URL', value: mediaUrl },
   ]

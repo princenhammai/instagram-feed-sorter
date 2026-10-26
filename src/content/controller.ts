@@ -5,10 +5,12 @@ import { CLOSED_SIMILAR, getSnap, notify, patch, type DownloadState } from './st
 import type { Folder } from '../lib/db'
 import { collectPosts } from '../lib/instagram/collect'
 import { exportColumns, objectsToTable, sortableName, table, tableToCsv, tableToJson, tableToTsv, toCsv, toJson, toTsv } from '../lib/export'
+import { describeSavedFile } from '../lib/file-download'
 import { humanError } from '../lib/format'
 import { headline } from '../lib/headline'
-import { downloadName, filesForPost, safeSegment, zipStem, type RemoteFile } from '../lib/media-files'
+import { downloadName, filesForPost, rankedVideoName, safeSegment, videoDownloadUrl, zipStem, type RemoteFile } from '../lib/media-files'
 import { withEngagement, withOutlierScores } from '../lib/outlier'
+import { withResearch } from '../lib/research'
 import { isRateLimit } from '../lib/instagram/page-data'
 import { rangeError, resolveRange } from '../lib/range'
 import { dateFilterAllowed, isSortable, outlierAllowed, parseSurface, sortBlockReason } from '../lib/surface'
@@ -168,7 +170,7 @@ async function showResults(
   if (token !== runToken) return
   const hasViews = collected.some((post) => post.views != null)
   const metric = outlierAllowed(surface) ? (surface.kind === 'reels' || hasViews ? 'views' : 'likes') : null
-  const posts = withEngagement(withOutlierScores(collected, metric), followers)
+  const posts = withResearch(withEngagement(withOutlierScores(collected, metric), followers))
   const warning =
     sortKey === 'outlier' && posts.every((post) => post.outlierScore == null)
       ? 'Not enough posts older than 3 days to score outliers.'
@@ -528,6 +530,74 @@ async function zipDownload(surface: Surface, entries: RemoteFile[]): Promise<voi
   notify(response.stopped ? `Stopped. Saved ${response.saved ?? 0} files.${failed}` : `Zip ready.${failed}`)
 }
 
+export async function downloadRanked(surface: Surface, posts: Post[]): Promise<void> {
+  if (posts.length === 0) {
+    notify('Nothing to download.')
+    return
+  }
+  if (getSnap().download) {
+    notify('A download is already running.')
+    return
+  }
+  const controller = new AbortController()
+  downloadAbort = controller
+  try {
+    const ready = await withRealMedia(posts, controller.signal, 'Getting video')
+    if (!ready) {
+      downloadAbort = null
+      patch({ download: null })
+      notify('Download stopped.')
+      return
+    }
+    const files: { name: string; url: string }[] = []
+    let skipped = 0
+    ready.forEach((post, index) => {
+      const url = videoDownloadUrl(post)
+      if (!url) {
+        skipped += 1
+        return
+      }
+      files.push({
+        name: downloadName(`${safeSegment(zipStem(surface))}/${rankedVideoName(index + 1, ready.length, post.shortcode)}`),
+        url,
+      })
+    })
+    const skippedNote = skipped ? ` ${skipped} had no video file and were skipped.` : ''
+    if (files.length === 0) {
+      downloadAbort = null
+      patch({ download: null })
+      notify(`Instagram did not return video files for these reels.${skippedNote}`)
+      return
+    }
+    patch({ download: downloadLabel(0, files.length, 'Queuing') })
+    const response = await send<{ ok?: boolean; saved?: number; failed?: number; stopped?: boolean; error?: string }>({
+      type: 'DOWNLOAD_RANKED',
+      files,
+    })
+    downloadAbort = null
+    patch({ download: null })
+    if (response?.stopped) {
+      notify('Download stopped.')
+      return
+    }
+    const saved = response?.saved ?? 0
+    const failed = response?.failed ?? 0
+    if (!response?.ok || saved === 0) {
+      notify(response?.error || 'Chrome did not save those videos.')
+      return
+    }
+    const first = files[0]?.name.split('/').pop()
+    const last = files[files.length - 1]?.name.split('/').pop()
+    const names = first && last && first !== last ? `${first} through ${last}` : first || 'the videos'
+    const problem = failed ? ` ${failed} failed${response.error ? `: ${response.error}` : '.'}` : ''
+    notify(`Started ${saved} downloads (${names}) in the current sort order, with no save dialog.${problem}${skippedNote}`)
+  } catch (error) {
+    downloadAbort = null
+    patch({ download: null })
+    notify(humanError(error))
+  }
+}
+
 export async function downloadPosts(surface: Surface, posts: Post[]): Promise<void> {
   if (posts.length === 0) {
     notify('Nothing to download.')
@@ -614,6 +684,19 @@ export function cancelDownload(): void {
   downloadAbort?.abort()
   stopMediaReads()
   void chrome.runtime.sendMessage({ type: 'CANCEL_ZIP' })
+  void chrome.runtime.sendMessage({ type: 'CANCEL_RANKED' })
+}
+
+async function deliverFile(
+  message: { type: 'DOWNLOAD_TEXT' | 'DOWNLOAD_BYTES'; filename: string; mime: string; text?: string; base64?: string },
+  success: string,
+): Promise<void> {
+  const response = await send<{ ok?: boolean; error?: string; filename?: string }>(message)
+  if (!response?.ok) {
+    notify(response?.error || 'Export failed. Chrome did not save a file.')
+    return
+  }
+  notify(`${success} Saved to ${describeSavedFile(response.filename)}.`)
 }
 
 export function setDownloadProgress(done: number, total: number): void {
@@ -698,26 +781,31 @@ export async function exportPosts(surface: Surface, posts: Post[], format: Expor
       await publishSheet(sortableName(isSortable(surface) ? surface : { kind: 'posts', username: 'instagram' }), toCsv(columns, posts), toTsv(columns, posts))
       return
     }
+    const count = `${posts.length} rows`
     if (format === 'csv') {
-      await send({ type: 'DOWNLOAD_TEXT', filename: `${base}.csv`, mime: 'text/csv;charset=utf-8', text: toCsv(columns, posts) })
+      await deliverFile(
+        { type: 'DOWNLOAD_TEXT', filename: `${base}.csv`, mime: 'text/csv;charset=utf-8', text: toCsv(columns, posts) },
+        `Exported ${count}.`,
+      )
     } else if (format === 'json') {
-      await send({
-        type: 'DOWNLOAD_TEXT',
-        filename: `${base}.json`,
-        mime: 'application/json',
-        text: toJson(columns, posts),
-      })
+      await deliverFile(
+        { type: 'DOWNLOAD_TEXT', filename: `${base}.json`, mime: 'application/json', text: toJson(columns, posts) },
+        `Exported ${count}.`,
+      )
     } else {
       const sheet = sortableName(isSortable(surface) ? surface : { kind: 'posts', username: 'instagram' })
       const bytes = await buildXlsx(sheet, table(columns, posts))
-      await send({
-        type: 'DOWNLOAD_BYTES',
-        filename: `${base}.xlsx`,
-        mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        base64: base64Of(bytes),
-      })
+      await deliverFile(
+        {
+          type: 'DOWNLOAD_BYTES',
+          filename: `${base}.xlsx`,
+          mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          base64: base64Of(bytes),
+        },
+        `Exported ${count}.`,
+      )
     }
-    notify(`Exported ${posts.length} rows, including video links, captions, and durations.`)
+    return
   } catch (error) {
     downloadAbort = null
     patch({ download: null })
@@ -774,19 +862,28 @@ export async function exportSimilar(
       return
     }
     if (format === 'csv') {
-      await send({ type: 'DOWNLOAD_TEXT', filename: `${base}.csv`, mime: 'text/csv;charset=utf-8', text: tableToCsv(tableRows) })
+      await deliverFile(
+        { type: 'DOWNLOAD_TEXT', filename: `${base}.csv`, mime: 'text/csv;charset=utf-8', text: tableToCsv(tableRows) },
+        `Exported ${rows.length} similar accounts.`,
+      )
     } else if (format === 'json') {
-      await send({ type: 'DOWNLOAD_TEXT', filename: `${base}.json`, mime: 'application/json', text: tableToJson(tableRows) })
+      await deliverFile(
+        { type: 'DOWNLOAD_TEXT', filename: `${base}.json`, mime: 'application/json', text: tableToJson(tableRows) },
+        `Exported ${rows.length} similar accounts.`,
+      )
     } else {
       const bytes = await buildXlsx('Similar', tableRows)
-      await send({
-        type: 'DOWNLOAD_BYTES',
-        filename: `${base}.xlsx`,
-        mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        base64: base64Of(bytes),
-      })
+      await deliverFile(
+        {
+          type: 'DOWNLOAD_BYTES',
+          filename: `${base}.xlsx`,
+          mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          base64: base64Of(bytes),
+        },
+        `Exported ${rows.length} similar accounts.`,
+      )
     }
-    notify(`Exported ${rows.length} similar accounts.`)
+    return
   } catch (error) {
     notify(humanError(error))
   }

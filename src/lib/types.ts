@@ -1,6 +1,29 @@
-export type SortKey = 'views' | 'likes' | 'comments' | 'outlier' | 'engagement' | 'newest' | 'oldest'
+export type SortKey =
+  | 'views'
+  | 'likes'
+  | 'comments'
+  | 'outlier'
+  | 'engagement'
+  | 'duration'
+  | 'median'
+  | 'likeRate'
+  | 'commentRate'
+  | 'newest'
+  | 'oldest'
 
-export const SORT_KEYS: SortKey[] = ['views', 'likes', 'comments', 'outlier', 'engagement', 'newest', 'oldest']
+export const SORT_KEYS: SortKey[] = [
+  'views',
+  'likes',
+  'comments',
+  'outlier',
+  'engagement',
+  'duration',
+  'median',
+  'likeRate',
+  'commentRate',
+  'newest',
+  'oldest',
+]
 
 export type MediaKind = 'image' | 'video' | 'carousel'
 
@@ -25,8 +48,18 @@ export interface Post {
   slides: Slide[]
   duration?: number | null
   videoLowUrl?: string | null
+  audio?: string | null
+  paidPartnership?: boolean
   outlierScore?: number | null
   engagementRate?: number | null
+  /** Views divided by the median views of the loaded set. */
+  medianScore?: number | null
+  /** Likes divided by views. */
+  likeRate?: number | null
+  /** Comments divided by views. */
+  commentRate?: number | null
+  likelyPaid?: boolean
+  paidSignals?: string[]
 }
 
 export type Surface =

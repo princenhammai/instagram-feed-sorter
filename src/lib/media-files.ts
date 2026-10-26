@@ -90,6 +90,17 @@ export function filesForPost(post: Post, order?: number): RemoteFile[] {
   return []
 }
 
+export function videoDownloadUrl(post: Post): string | null {
+  if (post.videoUrl && isAllowedMediaUrl(post.videoUrl)) return post.videoUrl
+  const slide = post.slides.find((item) => item.kind === 'video' && isAllowedMediaUrl(item.url))
+  return slide?.url ?? null
+}
+
+export function rankedVideoName(position: number, total: number, shortcode: string): string {
+  const width = Math.max(2, String(Math.max(total, position, 1)).length)
+  return `rank${String(position).padStart(width, '0')}_${safeSegment(shortcode || 'reel')}.mp4`
+}
+
 export function needsZip(posts: Post[]): boolean {
   if (posts.length !== 1) return true
   return filesForPost(posts[0]).length !== 1
