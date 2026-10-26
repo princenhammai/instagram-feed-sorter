@@ -268,6 +268,8 @@ async function run(call: MainCall): Promise<unknown> {
       return Array.from(captured.values())
     case 'followers':
       return followers(call.username || '')
+    case 'following':
+      return followingPage(call.username || '', call.maxId)
     default:
       throw new Error('Unknown request.')
   }
@@ -303,6 +305,16 @@ function ingest(raw: unknown): void {
     if (post) captured.set(post.id, mergePost(captured.get(post.id), post))
   }
   for (const [username, count] of extractFollowerCounts(raw)) followerCounts.set(username, count)
+}
+
+async function followingPage(username: string, maxId?: string): Promise<unknown> {
+  const info = await profile(username)
+  const id = extractUserId(info)
+  if (!id) throw new HttpError('Instagram did not return that profile.', 404)
+  const url = new URL(`https://www.instagram.com/api/v1/friendships/${encodeURIComponent(id)}/following/`)
+  url.searchParams.set('count', '12')
+  if (maxId) url.searchParams.set('max_id', maxId)
+  return igFetch(url.toString())
 }
 
 async function followers(username: string): Promise<number | null> {

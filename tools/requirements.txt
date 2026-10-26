@@ -1,0 +1,4 @@
+# Optional. The CLI runs with ffmpeg and ffprobe on PATH and the Python standard library.
+# Uncomment a local transcriber if you want speech-to-text on this machine:
+# faster-whisper
+# On-screen text uses the tesseract binary, not a Python package.

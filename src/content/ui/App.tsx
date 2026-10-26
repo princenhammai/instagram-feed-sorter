@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { FinderDock } from './FinderDock'
 import { InlinePanel } from './inline'
 import {
   cancelDownload,
@@ -1158,6 +1159,7 @@ function PageTools() {
           )}
         </div>
       )}
+      {(surface.kind === 'posts' || surface.kind === 'reels') && <FinderDock username={surface.username} />}
       {(surface.kind === 'post' || surface.kind === 'stories') && (snap.settings.showDownload || snap.settings.showSave) && (
         <div className="page-tools">
           {snap.settings.showDownload && (

@@ -37,9 +37,40 @@ The extension is portable across desktop operating systems. GitHub hosting does 
 - Filter results, hide likely-paid posts, and inspect them in the built-in player or on Instagram. A post is marked likely paid when the caption has `#ad`, `#sponsored`, or a paid-partnership tag, when Instagram marks it as a paid partnership, or when its likes per view are under 10% of the loaded set's median like rate while its views are at least that median.
 - Show the audio or song name and video duration when Instagram includes them.
 - Export Google Sheets, Excel, CSV, JSON or clipboard data. CSV, JSON and Excel files are written into the downloads folder, and a failed save is reported instead of a success message.
-- Download the top videos in the current sort as `rank01_<shortcode>.mp4` with no save dialog per file. Download other media and keep posts in local folders with the Library.
+- Download the top videos in the current sort as `rank01_<handle>_<shortcode>.mp4` with no save dialog per file. Download other media and keep posts in local folders with the Library.
+- Batch a pasted list of handles into one CSV and one Excel file, with a per-account summary sheet. Optional Google Sheet or Notion sync is off until you turn it on. Find suggested and following accounts from a profile and send them to that batch.
 - Optional video transcription using your own Whisper-compatible provider/key.
 - View related accounts suggested by Instagram from the Sorter overlay.
+
+## Batch runner
+
+On an Instagram tab, open the extension popup and paste handles (one per line, or profile URLs). Set how many Reels to load per account (up to 200) and the delay between Instagram requests (400–10000 ms, default 1200). Run batch.
+
+The tab visits each profile's Reels page, reads up to N Reels, and scores that account on its own median. The export is one CSV of every Reel plus one Excel workbook with a Reels sheet and a Summary sheet (reels loaded, median views, top Reel, and how many Reels are at 3× the account median). Pause keeps the finished accounts. Resume continues at the next handle. A rate limit pauses the job instead of hammering Instagram.
+
+## Account finder
+
+On a profile, use **Find accounts**. It reads Suggested for you, optionally walks a short chain of those suggestions, scrolls an open following dialog, and pages the following list up to the cap you set. The same delay applies between requests. New handles are stored on this browser, deduped, and labeled with a source such as `suggested from ada`. Export the new rows, or send them straight into the batch runner. This does not follow, like, or message anyone.
+
+## Sheets and Notion
+
+Open the extension's options page. Sync is off by default.
+
+- Google Sheet uses the Google account already signed in to this browser. When a batch finishes, the merged Reel rows are created as a spreadsheet.
+- Notion uses an integration token and database URL you paste there. The token stays in extension storage. Summary rows (one per account) are added only when Notion is checked. Name number properties `Median views`, `Reels loaded`, `Reels at 3x`, and `Followers`, and a URL property `Top reel`, if you want those filled. The database title receives the account name. Requests are spaced by the batch delay.
+
+## Video breakdown
+
+After Download top N, the files are named `rank01_<handle>_<shortcode>.mp4`. A local Python script turns those files into a contact sheet, scene-cut times, and notes. It does not need an API key. ffmpeg and ffprobe must be on your PATH. Speech and on-screen text run only when you have installed a local tool.
+
+```sh
+python3 tools/breakdown.py "/path/to/rank01_ada_AbC.mp4" --out breakdowns
+# optional local transcript:
+# pip install -r tools/requirements.txt   # uncomment faster-whisper first
+python3 tools/breakdown.py ./downloads --whisper-model base
+```
+
+Each video gets `breakdowns/<name>/<name>.md`, a JSON file, `contact.jpg` (a frame about every 2 seconds), and `first-second.jpg`. Scene cuts come from ffmpeg. A transcript is added when faster-whisper imports or `whisper-cli` is on PATH with `--whisper-model` pointing at a local model. On-screen text is added when `tesseract` is on PATH.
 
 ## Data and optional services
 

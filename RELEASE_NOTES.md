@@ -1,3 +1,13 @@
+# Instagram Feed Sorter v0.4.0
+
+Batch research across accounts, still read-only.
+
+- Paste handles and the open Instagram tab visits each Reels page, loads up to 200 Reels, and waits a configurable delay between requests. One CSV and one Excel file include an account column, per-account median, × median, engagement, and the paid-post flag. The workbook adds a summary sheet. Pause and resume keep finished accounts.
+- Find accounts on a profile from suggestions and the following list, skip handles already saved, and export them or start a batch.
+- Google Sheets and Notion sync are off until you enable them in options. Notion uses a token stored only in this browser.
+- Download top N names files `rankNN_<handle>_<shortcode>.mp4`. `tools/breakdown.py` makes a local contact sheet, scene cuts, and optional offline transcript and OCR.
+- v0.3.3, below, is included: exports wait until Chrome finishes the file.
+
 # Instagram Feed Sorter v0.3.3
 
 Research sorting for a loaded set of Reels: compare each video with the median, separate like and comment rates, and set aside likely-paid posts before they skew a ranking.

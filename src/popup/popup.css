@@ -34,6 +34,7 @@ button { cursor: pointer; }
   font-size: 14px;
 }
 .row { display: flex; gap: 6px; align-items: center; }
+.row .field { width: auto; flex: 1; min-width: 0; }
 .icon { border: 0; background: var(--raised); color: var(--muted); width: 28px; height: 28px; border-radius: 8px; }
 .icon:hover { color: var(--ink); }
 
@@ -88,7 +89,8 @@ button { cursor: pointer; }
 .rank[aria-disabled='true'] { color: #6d7582; }
 .rank:disabled { cursor: progress; }
 
-.field, select {
+textarea.field { min-height: 72px; resize: vertical; }
+.field, select, textarea.field {
   width: 100%;
   box-sizing: border-box;
   padding: 8px 10px;

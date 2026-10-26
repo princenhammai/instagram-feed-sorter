@@ -29,6 +29,15 @@ export interface SimilarState {
   error: string | null
 }
 
+export interface BatchProgress {
+  index: number
+  total: number
+  handle: string
+  collected: number
+  limit: number
+  label: string
+}
+
 export interface Snap {
   href: string
   phase: Phase
@@ -36,6 +45,7 @@ export interface Snap {
   similar: SimilarState
   notice: string | null
   settings: Settings
+  batch: BatchProgress | null
 }
 
 export const CLOSED_SIMILAR: SimilarState = { open: false, loading: false, accounts: [], error: null }
@@ -47,6 +57,7 @@ let snap: Snap = {
   similar: CLOSED_SIMILAR,
   notice: null,
   settings: DEFAULT_SETTINGS,
+  batch: null,
 }
 
 const listeners = new Set<() => void>()

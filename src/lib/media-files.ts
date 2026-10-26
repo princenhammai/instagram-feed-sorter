@@ -96,9 +96,11 @@ export function videoDownloadUrl(post: Post): string | null {
   return slide?.url ?? null
 }
 
-export function rankedVideoName(position: number, total: number, shortcode: string): string {
+export function rankedVideoName(position: number, total: number, shortcode: string, handle = ''): string {
   const width = Math.max(2, String(Math.max(total, position, 1)).length)
-  return `rank${String(position).padStart(width, '0')}_${safeSegment(shortcode || 'reel')}.mp4`
+  const who = safeSegment(handle || 'reel')
+  const code = safeSegment(shortcode || 'reel')
+  return `rank${String(position).padStart(width, '0')}_${who}_${code}.mp4`
 }
 
 export function needsZip(posts: Post[]): boolean {

@@ -42,7 +42,23 @@ function worksheet(rows: (string | number | null)[][]): string {
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData></worksheet>`
 }
 
-export async function buildXlsx(name: string, rows: (string | number | null)[][]): Promise<ArrayBuffer> {
+export interface WorkbookSheet {
+  name: string
+  rows: (string | number | null)[][]
+}
+
+export async function buildWorkbook(sheets: WorkbookSheet[]): Promise<ArrayBuffer> {
+  const pages = sheets.length > 0 ? sheets : [{ name: 'Sheet1', rows: [] }]
+  const styleId = pages.length + 1
+  const overrides = pages
+    .map((_, index) => `  <Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`)
+    .join('\n')
+  const sheetTags = pages
+    .map((sheet, index) => `<sheet name="${sheetTitle(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`)
+    .join('')
+  const rels = pages
+    .map((_, index) => `  <Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`)
+    .join('\n')
   const zip = new JSZip()
   zip.file(
     '[Content_Types].xml',
@@ -51,7 +67,7 @@ export async function buildXlsx(name: string, rows: (string | number | null)[][]
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+${overrides}
   <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
 </Types>`,
   )
@@ -66,15 +82,15 @@ export async function buildXlsx(name: string, rows: (string | number | null)[][]
     'xl/workbook.xml',
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheets><sheet name="${sheetTitle(name)}" sheetId="1" r:id="rId1"/></sheets>
+  <sheets>${sheetTags}</sheets>
 </workbook>`,
   )
   zip.file(
     'xl/_rels/workbook.xml.rels',
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+${rels}
+  <Relationship Id="rId${styleId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>`,
   )
   zip.file(
@@ -88,6 +104,12 @@ export async function buildXlsx(name: string, rows: (string | number | null)[][]
   <cellXfs count="1"><xf/></cellXfs>
 </styleSheet>`,
   )
-  zip.file('xl/worksheets/sheet1.xml', worksheet(rows))
+  pages.forEach((sheet, index) => {
+    zip.file(`xl/worksheets/sheet${index + 1}.xml`, worksheet(sheet.rows))
+  })
   return zip.generateAsync({ type: 'arraybuffer' })
+}
+
+export async function buildXlsx(name: string, rows: (string | number | null)[][]): Promise<ArrayBuffer> {
+  return buildWorkbook([{ name, rows }])
 }
