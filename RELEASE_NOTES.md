@@ -1,3 +1,37 @@
+# Instagram Feed Sorter v0.4.3
+
+Batch and snowball now read each account by scrolling that profile's Reels grid, the same capture Sort uses. Keyword search uses the signed-in web search at `/web/search/topsearch/`. A batch that finds no reels stays paused instead of exporting an empty file. Still read-only. No new paid service and no Instagram writes.
+
+## Install the extension
+
+Download **instagram-feed-sorter-v0.4.3.zip** and **SHA256SUMS.txt**. From the folder that contains both, run `sha256sum -c SHA256SUMS.txt`. Extract the extension zip, then use Developer mode → Load unpacked in desktop Chrome or Edge. Select the folder that contains `manifest.json`. The manifest version is **0.4.3**. Sign in to Instagram yourself and open a profile's Reels tab. Reload the extension after replacing an older unpacked folder, then refresh Instagram.
+
+No Node.js, API key, or server is needed for sorting, batching, snowball research, or file export. This is a desktop Chromium build.
+
+## Install the video breakdown CLI
+
+Download **instagram-feed-sorter-breakdown-v0.4.3.zip**. It contains `breakdown.py`, `requirements.txt`, and `INSTALL.md`. ffmpeg and ffprobe are required. tesseract and faster-whisper are optional and free. Follow `INSTALL.md` inside the zip. This script is experimental.
+
+## Quickstart
+
+- **Research panel.** On an Instagram tab, choose Research. Paste handles. Snowball also has a Keywords field. Set Reels per account (100 for batch, 30 for snowball). That count stays after Run. Run Batch or Snowball. The results table sorts by × median, engagement, or views, and hides paid reels until you show them. Snowball rows show provenance such as `search: keyword`. Export, Download top 10, and Sync are one click. Resume stays on the panel.
+- **Request log.** Each Instagram request is listed with its HTTP status, URL, and response snippet. Grid reads are listed too. The run pauses for rate limiting only on HTTP 429 or a body that contains `feedback_required`.
+- **Batch runner.** Each account is read by scrolling its Reels grid. If every account comes back empty, the batch stays paused and does not save an empty export.
+- **Account finder.** On a profile or Reels tab, Find accounts stays on the right. Profile id lookups prefer the id already on the page and slow down after HTTP 429.
+- **Sheets and Notion.** Options page. Both stay off until you enable them. Notion uses a token stored only in this browser.
+- **Video breakdown.** Download top N, then `python3 breakdown.py "rank01_ada_AbC.mp4" --out breakdowns --whisper-model tiny`.
+
+## Included
+
+- Reel loading for batch and snowball follows the in-page grid Sort already uses. Direct clips and feed calls that return HTML are not treated as a finished account.
+- Keyword search calls `https://www.instagram.com/web/search/topsearch/` from the page, with the web app headers (`X-IG-App-ID`, `X-CSRFToken`, `X-Requested-With`, `X-ASBD-ID`).
+- Clicking Keywords or Reels per account keeps the following keystrokes in that field. The Reels-per-account value is saved with the handles and restored after Run reloads the tab.
+- `web_profile_info` is skipped when the open page already has the account id, spaced 1.2 seconds apart, and backed off 15 seconds after HTTP 429.
+- Packaging fails if the built zip is missing `Find accounts`, `Keywords`, `search: keyword`, `Reels per account`, or `Request log`.
+- v0.4.2, below, is included.
+
+For updates, replace files in the same loaded folder, reload the extension, then refresh Instagram. Check `SHA256SUMS.txt` against every asset on this release. A folder that still says manifest 0.4.2 is an older build.
+
 # Instagram Feed Sorter v0.4.2
 
 The research panel now matches the single-profile Reels loader, and the packaged zip is checked for the Snowball and account-finder controls. Still read-only. No new paid service and no Instagram writes.

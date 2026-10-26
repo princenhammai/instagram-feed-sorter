@@ -178,7 +178,12 @@ export function pauseJob(job: BatchJob, note?: string, now = Date.now()): BatchJ
 }
 
 export function resumeJob(job: BatchJob, now = Date.now()): BatchJob {
-  if (job.index >= job.handles.length) return { ...job, status: 'done', updatedAt: now }
+  if (job.index >= job.handles.length) {
+    if (job.accounts.length > 0 && job.accounts.every((account) => account.reels.length === 0)) {
+      return { ...job, status: 'running', index: 0, accounts: [], note: undefined, updatedAt: now }
+    }
+    return { ...job, status: 'done', updatedAt: now }
+  }
   return { ...job, status: 'running', note: undefined, updatedAt: now }
 }
 
@@ -374,6 +379,10 @@ export function seenFromReels(reels: StoredReel[], now = Date.now()): SeenReel[]
     .map((reel) => ({ username: reel.username, shortcode: reel.shortcode, seenAt: now }))
 }
 
+function postsFrom(snapshot: AccountSnapshot): Post[] {
+  return uniquePosts(snapshot.posts)
+}
+
 export function applyAccountOutcome(
   job: BatchJob,
   handle: string,
@@ -392,33 +401,19 @@ export function applyAccountOutcome(
   if (interrupted && isRateLimited(interrupted)) {
     return { type: 'pause', job: pauseJob(job, interrupted, now), message: interrupted }
   }
-  if (thrown) {
-    return {
-      type: 'saved',
-      job: withAccount(
-        job,
-        { username: handle, status: 'error', error: thrown, followers: snapshot.followers, reels: [] },
-        now,
-      ),
+  if (thrown || postsFrom(snapshot).length === 0) {
+    const message = thrown || interrupted || 'No reels came back from this profile grid.'
+    const next = withAccount(
+      job,
+      { username: handle, status: 'error', error: message, followers: snapshot.followers, reels: [] },
+      now,
+    )
+    if (next.status === 'done' && next.accounts.every((account) => account.reels.length === 0)) {
+      return { type: 'pause', job: pauseJob(next, message, now), message }
     }
+    return { type: 'saved', job: next }
   }
-  const posts = uniquePosts(snapshot.posts)
-  if (posts.length === 0) {
-    return {
-      type: 'saved',
-      job: withAccount(
-        job,
-        {
-          username: handle,
-          status: 'error',
-          error: interrupted || 'No reels came back. The account may be private.',
-          followers: snapshot.followers,
-          reels: [],
-        },
-        now,
-      ),
-    }
-  }
+  const posts = postsFrom(snapshot)
   return {
     type: 'saved',
     job: withAccount(

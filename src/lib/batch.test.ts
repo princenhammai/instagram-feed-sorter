@@ -105,6 +105,26 @@ describe('batch outcomes', () => {
     expect(empty.job.accounts[1]).toMatchObject({ status: 'error', reels: [] })
   })
 
+  it('pauses a finished batch when every account came back with no reels', () => {
+    const job = createJob(['ada', 'bob'], 25, 400, 1)
+    const message = 'No reels came back from this profile grid.'
+    const first = applyAccountOutcome(job, 'ada', { followers: null, posts: [], thrown: message }, new Set(), 2)
+    expect(first.type).toBe('saved')
+    if (first.type !== 'saved') return
+    expect(first.job.status).toBe('running')
+    expect(first.job.index).toBe(1)
+    const second = applyAccountOutcome(first.job, 'bob', { followers: null, posts: [], thrown: message }, new Set(), 3)
+    expect(second.type).toBe('pause')
+    expect(second.job.status).toBe('paused')
+    expect(second.job.note).toBe(message)
+    expect(second.job.accounts.every((account) => account.reels.length === 0)).toBe(true)
+    const resumed = resumeJob(second.job, 4)
+    expect(resumed.status).toBe('running')
+    expect(resumed.index).toBe(0)
+    expect(resumed.accounts).toEqual([])
+    expect(currentHandle(resumed)).toBe('ada')
+  })
+
   it('marks shortcodes from an earlier run and leaves them off the new-reels sheet', () => {
     const known = seenKeySet(mergeSeen([], [{ username: 'ada', shortcode: 'AbC', seenAt: 1 }]))
     const job = createJob(['ada'], 10, 400, 1)

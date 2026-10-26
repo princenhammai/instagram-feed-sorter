@@ -1,20 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { accountSearchUrl, accountsInSearch, hashtagUrl, reelsSearchUrl, topSerpUrl, userSearchUrl } from './search'
+import { accountSearchUrl, accountsInSearch, hashtagUrl, userSearchUrl } from './search'
 
 describe('account search url', () => {
   it('uses the signed-in web search call and names the surface', () => {
     const url = new URL(accountSearchUrl('barber'))
     expect(url.origin).toBe('https://www.instagram.com')
-    expect(url.pathname).toBe('/api/v1/web/search/topsearch/')
-    expect(url.searchParams.get('search_surface')).toBe('web_top_search')
+    expect(url.pathname).toBe('/web/search/topsearch/')
     expect(url.searchParams.get('context')).toBe('blended')
+    expect(url.searchParams.get('include_reel')).toBe('true')
     expect(url.searchParams.get('query')).toBe('barber')
   })
 
-  it('points keyword search at the accounts tab, Reels, and a hashtag', () => {
-    expect(new URL(userSearchUrl('nail art')).searchParams.get('context')).toBe('user')
-    expect(new URL(reelsSearchUrl('nail art')).pathname).toBe('/api/v1/fbsearch/reels_serp/')
-    expect(new URL(topSerpUrl('nail art')).pathname).toBe('/api/v1/fbsearch/web/top_serp/')
+  it('points keyword search at the accounts tab', () => {
+    const url = new URL(userSearchUrl('nail art'))
+    expect(url.pathname).toBe('/web/search/topsearch/')
+    expect(url.searchParams.get('context')).toBe('user')
+    expect(url.searchParams.get('query')).toBe('nail art')
     expect(hashtagUrl('#Barber_Shop')).toContain('tag_name=Barber_Shop')
     expect(hashtagUrl('nail art')).toBeNull()
   })

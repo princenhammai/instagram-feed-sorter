@@ -2,35 +2,28 @@ import { extractItems, extractUsers } from './extract'
 import { normalizeMedia } from './normalize'
 import type { SimilarAccount } from '../types'
 
-export function accountSearchUrl(query: string): string {
-  const url = new URL('https://www.instagram.com/api/v1/web/search/topsearch/')
-  url.searchParams.set('search_surface', 'web_top_search')
-  url.searchParams.set('context', 'blended')
-  url.searchParams.set('include_reel', 'true')
+function rankToken(): string {
+  const digits = Math.floor(Math.random() * 1e15)
+    .toString()
+    .padStart(15, '0')
+  return `0.${digits}`
+}
+
+function topSearch(query: string, context: 'user' | 'blended' | 'hashtag'): string {
+  const url = new URL('https://www.instagram.com/web/search/topsearch/')
+  url.searchParams.set('context', context)
   url.searchParams.set('query', query.trim())
+  url.searchParams.set('include_reel', 'true')
+  url.searchParams.set('rank_token', rankToken())
   return url.toString()
+}
+
+export function accountSearchUrl(query: string): string {
+  return topSearch(query, 'blended')
 }
 
 export function userSearchUrl(query: string): string {
-  const url = new URL('https://www.instagram.com/api/v1/web/search/topsearch/')
-  url.searchParams.set('search_surface', 'web_top_search')
-  url.searchParams.set('context', 'user')
-  url.searchParams.set('include_reel', 'true')
-  url.searchParams.set('query', query.trim())
-  return url.toString()
-}
-
-export function reelsSearchUrl(query: string): string {
-  const url = new URL('https://www.instagram.com/api/v1/fbsearch/reels_serp/')
-  url.searchParams.set('query', query.trim())
-  return url.toString()
-}
-
-export function topSerpUrl(query: string): string {
-  const url = new URL('https://www.instagram.com/api/v1/fbsearch/web/top_serp/')
-  url.searchParams.set('query', query.trim())
-  url.searchParams.set('enable_metadata', 'true')
-  return url.toString()
+  return topSearch(query, 'user')
 }
 
 export function hashtagUrl(tag: string): string | null {

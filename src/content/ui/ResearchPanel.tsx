@@ -7,6 +7,11 @@ function isolate(event: SyntheticEvent) {
   event.nativeEvent.stopImmediatePropagation()
 }
 
+function keepFocus(event: SyntheticEvent<HTMLTextAreaElement | HTMLInputElement>) {
+  event.stopPropagation()
+  event.currentTarget.focus()
+}
+
 export function ResearchPanel({
   seeds,
   onSeeds,
@@ -88,10 +93,12 @@ export function ResearchPanel({
       <label className="research-seeds">
         Seed handles
         <textarea
+          id="ifs-seeds"
           value={seeds}
           rows={mode === 'snowball' ? 3 : 5}
           placeholder={'@ada\nhttps://www.instagram.com/bob/'}
           aria-label="Seed handles, one per line"
+          onPointerDown={keepFocus}
           onChange={(event) => onSeeds(event.target.value)}
         />
       </label>
@@ -99,10 +106,12 @@ export function ResearchPanel({
         <label className="research-seeds">
           Keywords
           <textarea
+            id="ifs-keywords"
             value={keywords}
             rows={3}
             placeholder={'barber\nnail art'}
             aria-label="Keywords, one per line"
+            onPointerDown={keepFocus}
             onChange={(event) => onKeywords(event.target.value)}
           />
         </label>
@@ -111,12 +120,14 @@ export function ResearchPanel({
       <label className="research-count">
         Reels per account
         <input
+          id="ifs-reels"
           type="number"
           min={1}
           max={reelsMax}
           inputMode="numeric"
           value={reels}
           aria-label="Reels per account"
+          onPointerDown={keepFocus}
           onChange={(event) => onReels(event.target.value)}
         />
       </label>
@@ -131,8 +142,8 @@ export function ResearchPanel({
       </div>
       <p className="note">
         {mode === 'batch'
-          ? 'Same Reels loader as a single-profile sort, 1.2s apart. Only HTTP 429 or feedback_required pauses the run.'
-          : 'Keywords add up to 15 accounts each as search: keyword, then the same STRONG expansion.'}
+          ? 'Reads each profile’s Reels grid the same way Sort does, 1.2s apart. A run that finds no reels stays paused instead of exporting an empty file. Only HTTP 429 or feedback_required pauses for rate limiting.'
+          : 'Keywords use the accounts search, up to 15 accounts each, with provenance search: keyword, then the same STRONG expansion.'}
       </p>
 
       <div className="row">

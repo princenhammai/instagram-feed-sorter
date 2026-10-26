@@ -2,7 +2,7 @@
 
 Offline notes for Reels already downloaded with Instagram Feed Sorter. The script reads mp4 files on this computer. It does not upload them and it does not need an API key.
 
-From a git checkout the script is `tools/breakdown.py`. From the release zip `instagram-feed-sorter-breakdown-v0.4.2.zip`, the same files sit in one folder and the command is `python3 breakdown.py`.
+From a git checkout the script is `tools/breakdown.py`. From the release zip `instagram-feed-sorter-breakdown-v0.4.3.zip`, the same files sit in one folder and the command is `python3 breakdown.py`.
 
 ## What you need
 

@@ -45,9 +45,12 @@ import {
 import { SYNC_KEY, cleanSync, notionReady, type SummarySyncRow, type SyncSettings } from '../../lib/sync'
 import { buildWorkbook } from '../../lib/xlsx'
 
+const DRAFT_KEY = 'ifs-research-draft'
+
 function problemNote(note: string | undefined, status: string | undefined): string {
   if (!note || status === 'done' || note === 'Paused.') return ''
-  if (/rate limit|429|feedback_required|please wait|daily cap|could not|didn't|private|error/i.test(note)) return note
+  if (status === 'paused') return note
+  if (/rate limit|429|feedback_required|please wait|daily cap|could not|didn't|private|error|no reels/i.test(note)) return note
   return ''
 }
 
@@ -67,7 +70,6 @@ export function ResearchDock() {
   const [reels, setReels] = useState(String(DEFAULT_REELS))
   const [edited, setEdited] = useState(false)
   const [keywordsEdited, setKeywordsEdited] = useState(false)
-  const [reelsEdited, setReelsEdited] = useState(false)
   const debug = useRequestLog()
   const [mode, setMode] = useState<ResearchMode>('batch')
   const [batchJob, setBatchJob] = useState<BatchJob | null>(null)
@@ -81,11 +83,44 @@ export function ResearchDock() {
   const [busy, setBusy] = useState<'' | 'export' | 'download' | 'sync'>('')
   const hydrated = useRef<{ batch: boolean; snowball: boolean }>({ batch: false, snowball: false })
   const keywordsHydrated = useRef(false)
+  const draftReady = useRef(false)
 
   useEffect(() => {
     const load = async () => {
-      const stored = await chrome.storage.local.get([BATCH_PROGRESS_KEY, SNOWBALL_KEY, SNOWBALL_PROGRESS_KEY, RESEARCH_OPEN_KEY, REQUEST_LOG_KEY])
+      const stored = await chrome.storage.local.get([
+        BATCH_PROGRESS_KEY,
+        SNOWBALL_KEY,
+        SNOWBALL_PROGRESS_KEY,
+        RESEARCH_OPEN_KEY,
+        REQUEST_LOG_KEY,
+        DRAFT_KEY,
+      ])
       hydrateTraces(stored[REQUEST_LOG_KEY])
+      if (!draftReady.current) {
+        const draft = stored[DRAFT_KEY] as { seeds?: unknown; keywords?: unknown; reels?: unknown; mode?: unknown } | undefined
+        if (draft && typeof draft === 'object') {
+          if (typeof draft.seeds === 'string') {
+            setSeeds(draft.seeds)
+            if (draft.seeds) {
+              setEdited(true)
+              hydrated.current.batch = true
+              hydrated.current.snowball = true
+            }
+          }
+          if (typeof draft.keywords === 'string') {
+            setKeywords(draft.keywords)
+            if (draft.keywords) {
+              setKeywordsEdited(true)
+              keywordsHydrated.current = true
+            }
+          }
+          if (typeof draft.reels === 'string' && draft.reels.trim()) {
+            setReels(draft.reels)
+          }
+          if (draft.mode === 'batch' || draft.mode === 'snowball') setMode(draft.mode)
+        }
+        draftReady.current = true
+      }
       const batch = await loadJob()
       const snow = isSnowballJob(stored[SNOWBALL_KEY]) ? stored[SNOWBALL_KEY] : null
       setBatchJob(batch)
@@ -123,9 +158,9 @@ export function ResearchDock() {
   }, [mode, batchJob, snowJob, edited])
 
   useEffect(() => {
-    if (reelsEdited) return
-    setReels(String(mode === 'batch' ? DEFAULT_REELS : DEFAULT_SNOWBALL_REELS))
-  }, [mode, reelsEdited])
+    if (!draftReady.current) return
+    void chrome.storage.local.set({ [DRAFT_KEY]: { seeds, keywords, reels, mode } })
+  }, [seeds, keywords, reels, mode])
 
   useEffect(() => {
     if (keywordsEdited || keywordsHydrated.current) return
@@ -396,13 +431,22 @@ export function ResearchDock() {
           }}
           reels={reels}
           onReels={(value) => {
-            setReelsEdited(true)
             setReels(value)
           }}
           reelsMax={mode === 'batch' ? 200 : MAX_SNOWBALL_REELS}
           debug={debug}
           mode={mode}
-          onMode={setMode}
+          onMode={(next) => {
+            setMode((current) => {
+              if (next === current) return current
+              setReels((value) => {
+                if (next === 'snowball' && value === String(DEFAULT_REELS)) return String(DEFAULT_SNOWBALL_REELS)
+                if (next === 'batch' && value === String(DEFAULT_SNOWBALL_REELS)) return String(DEFAULT_REELS)
+                return value
+              })
+              return next
+            })
+          }}
           running={Boolean(running)}
           paused={Boolean(paused)}
           progress={progress}

@@ -1,4 +1,6 @@
-import { followerCount, loadPage, resetReelsSource } from './api'
+import { followerCount } from './api'
+import { collectGridReels } from './capture-reels'
+import { recordTrace } from './request-log'
 import { getSnap, notify, patch, type BatchProgress } from './store'
 import {
   BATCH_KEY,
@@ -14,6 +16,7 @@ import {
   currentHandle,
   isBatchJob,
   mergeSeen,
+  isRateLimited,
   pauseJob,
   progressLabel,
   reelsUrl,
@@ -25,7 +28,6 @@ import {
   type BatchJob,
   type SeenReel,
 } from '../lib/batch'
-import { collectPosts } from '../lib/instagram/collect'
 import { buildWorkbook } from '../lib/xlsx'
 import { SYNC_KEY, cleanSync, notionReady, type SummarySyncRow, type SyncSettings } from '../lib/sync'
 import { downloadName, safeSegment } from '../lib/media-files'
@@ -179,6 +181,15 @@ async function runOnce(): Promise<void> {
   }
   const handle = currentHandle(existing)
   if (!handle) {
+    const empty = existing.accounts.length > 0 && existing.accounts.every((account) => account.reels.length === 0)
+    if (empty) {
+      const note = existing.accounts.find((account) => account.error)?.error || existing.note || 'No reels came back from this profile grid.'
+      await saveJob(pauseJob(existing, note))
+      await saveProgress(null)
+      patch({ phase: { type: 'idle' }, batch: null })
+      notify(`${note} Resume the batch from the research panel.`)
+      return
+    }
     await saveJob({ ...existing, status: 'done', updatedAt: Date.now() })
     await saveProgress(null)
     await exportJob(existing)
@@ -217,7 +228,7 @@ async function runOnce(): Promise<void> {
         collected,
         label: `${latest.index + 1}/${latest.handles.length} · @${handle}`,
         percent: latest.reelsPerAccount > 0 ? Math.min(100, (collected / latest.reelsPerAccount) * 100) : null,
-        scrolling: false,
+        scrolling: true,
       },
       batch: progress,
     })
@@ -225,13 +236,11 @@ async function runOnce(): Promise<void> {
 
   let followers: number | null = null
   try {
-    resetReelsSource(handle)
-    const result = await collectPosts({
-      limit: latest.reelsPerAccount,
-      delayMs: latest.delayMs,
-      signal,
-      onProgress: (collected) => showCollecting(collected),
-      load: (maxId) => loadPage({ kind: 'reels', username: handle }, maxId),
+    const posts = await collectGridReels(handle, latest.reelsPerAccount, signal, (collected) => showCollecting(collected))
+    recordTrace({
+      url: location.href,
+      status: posts.length > 0 ? 200 : 0,
+      snippet: posts.length > 0 ? `${posts.length} reels read from the page grid` : 'The page grid did not load any reels.',
     })
     try {
       followers = await followerCount(handle)
@@ -245,9 +254,8 @@ async function runOnce(): Promise<void> {
         handle,
         {
           followers,
-          posts: result.posts,
-          interrupted: result.interrupted,
-          stopped: result.stopped,
+          posts,
+          thrown: posts.length === 0 && !signal.aborted ? 'No reels came back from this profile grid.' : '',
           aborted: signal.aborted,
         },
         known,
@@ -266,12 +274,10 @@ async function settle(decision: AccountDecision): Promise<void> {
   if (decision.type === 'pause') {
     patch({ phase: { type: 'idle' }, batch: null })
     await saveProgress(null)
-    const calm = decision.message !== 'Paused.'
-    notify(
-      calm
-        ? `${decision.message} Resume the batch from the research panel when Instagram has calmed down.`
-        : 'Batch paused. Resume it from the research panel.',
-    )
+    if (decision.message === 'Paused.') notify('Batch paused. Resume it from the research panel.')
+    else if (isRateLimited(decision.message)) {
+      notify(`${decision.message} Resume the batch from the research panel when Instagram has calmed down.`)
+    } else notify(`${decision.message} Resume the batch from the research panel.`)
     return
   }
   const account = decision.job.accounts[decision.job.accounts.length - 1]

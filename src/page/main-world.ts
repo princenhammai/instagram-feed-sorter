@@ -1,5 +1,5 @@
 import { extractFollowerCounts, extractItems, extractUserId, extractUsers } from '../lib/instagram/extract'
-import { accountSearchUrl, hashtagUrl, reelsSearchUrl, topSerpUrl, userSearchUrl } from '../lib/instagram/search'
+import { accountSearchUrl, hashtagUrl, userSearchUrl } from '../lib/instagram/search'
 import { isInstagramDataUrl, mergePost, parseBodies } from '../lib/instagram/capture'
 import { normalizeMedia } from '../lib/instagram/normalize'
 import { findUserIdInText, hasFeedbackRequired, HttpError, httpFailureMessage, responseSnippet } from '../lib/instagram/page-data'
@@ -7,6 +7,7 @@ import type { Post, SimilarAccount } from '../lib/types'
 import { ISO_SOURCE, MAIN_SOURCE, type MainCall } from '../lib/protocol'
 
 const APP_ID = '936619743392459'
+const DEFAULT_ASBD = '359341'
 const hooked = '__ifsHistoryHooked'
 
 function cookie(name: string): string {
@@ -14,15 +15,27 @@ function cookie(name: string): string {
   return match?.[1] ? decodeURIComponent(match[1]) : ''
 }
 
+function pageValue(pattern: RegExp): string {
+  for (const script of document.querySelectorAll('script:not([src])')) {
+    const match = script.textContent?.match(pattern)
+    if (match?.[1]) return match[1]
+  }
+  return ''
+}
+
 function headers(): Record<string, string> {
   const csrf = cookie('csrftoken')
   const claim = cookie('ig_www_claim')
+  const asbd = pageValue(/ASBD_ID["']?\s*[:=]\s*["']?(\d{4,10})/) || DEFAULT_ASBD
+  const ajax = pageValue(/rollout_hash["']?\s*[:=]\s*["']([A-Za-z0-9_-]{6,})/)
   return {
-    accept: 'application/json',
+    accept: '*/*',
     'x-ig-app-id': APP_ID,
+    'x-asbd-id': asbd,
     'x-csrftoken': csrf,
     'x-csrf-token': csrf,
     'x-requested-with': 'XMLHttpRequest',
+    ...(ajax ? { 'x-instagram-ajax': ajax } : {}),
     ...(claim ? { 'x-ig-www-claim': claim } : {}),
   }
 }
@@ -116,19 +129,43 @@ function cachedUserId(username: string): string | undefined {
   return userIds.get(username.toLowerCase()) || userIdFromPage(username)
 }
 
+let nextProfileAt = 0
+
+async function waitForPageId(username: string): Promise<string | undefined> {
+  const deadline = Date.now() + 4000
+  while (Date.now() < deadline) {
+    const id = cachedUserId(username)
+    if (id) return id
+    await wait(250)
+  }
+  return cachedUserId(username)
+}
+
+async function webProfile(username: string): Promise<unknown> {
+  const gap = nextProfileAt - Date.now()
+  if (gap > 0) await wait(gap)
+  nextProfileAt = Date.now() + 1200
+  try {
+    return await igFetch(`https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`)
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 429) nextProfileAt = Date.now() + 15_000
+    throw error
+  }
+}
+
 async function profile(username: string): Promise<unknown> {
-  const known = cachedUserId(username)
+  scanEmbedded()
+  const known = cachedUserId(username) || (viewingProfile(username) ? await waitForPageId(username) : undefined)
   if (known) {
     userIds.set(username.toLowerCase(), known)
     return { data: { user: { id: known } } }
   }
   try {
-    const raw = await igFetch(
-      `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
-    )
+    const raw = await webProfile(username)
     ingest(raw)
     return raw
   } catch (error) {
+    if (error instanceof HttpError && error.status === 429) throw error
     const search = (await igFetch(accountSearchUrl(username)).catch(() => null)) as {
       users?: { user?: { username?: string; pk?: unknown; pk_id?: unknown } }[]
     } | null
@@ -181,14 +218,15 @@ async function similarTo(username: string): Promise<SimilarAccount[]> {
     if (embedded.length > 0) return embedded
   }
 
-  let id = cachedUserId(username)
+  let id = cachedUserId(username) || (viewingProfile(username) ? await waitForPageId(username) : undefined)
   let lastError: unknown
-  const profilePayload = await fetchOnce(
-    `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
-  ).catch((error: unknown) => {
-    lastError = error
-    return null
-  })
+  let profilePayload: unknown = null
+  if (!id) {
+    profilePayload = await webProfile(username).catch((error: unknown) => {
+      lastError = error
+      return null
+    })
+  }
   if (profilePayload) {
     ingest(profilePayload)
     const found = exceptTarget(username, extractUsers(profilePayload))
@@ -227,13 +265,7 @@ function withMax(url: string, maxId?: string): string {
 }
 
 async function reelsSearch(query: string): Promise<unknown> {
-  try {
-    const raw = await igFetch(reelsSearchUrl(query))
-    if (extractItems(raw).length > 0 || extractUsers(raw).length > 0) return raw
-  } catch (error) {
-    if (error instanceof HttpError && error.status === 429) throw error
-  }
-  return igFetch(topSerpUrl(query))
+  return igFetch(userSearchUrl(query))
 }
 
 async function hashtagPage(query: string): Promise<unknown> {
@@ -243,9 +275,7 @@ async function hashtagPage(query: string): Promise<unknown> {
 }
 
 async function search(query: string, maxId?: string): Promise<unknown> {
-  const url = new URL('https://www.instagram.com/api/v1/fbsearch/web/top_serp/')
-  url.searchParams.set('query', query)
-  url.searchParams.set('enable_metadata', 'true')
+  const url = new URL(accountSearchUrl(query))
   if (maxId) url.searchParams.set('next_max_id', maxId)
   const primary = await igFetch(url.toString())
   if (maxId || extractItems(primary).length > 0) return primary
@@ -410,7 +440,7 @@ async function followers(username: string): Promise<number | null> {
   const known = followerCounts.get(key)
   if (known != null) return known
   try {
-    ingest(await igFetch(`https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`))
+    ingest(await webProfile(username))
   } catch {
     return null
   }

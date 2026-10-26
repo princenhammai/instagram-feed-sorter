@@ -1,9 +1,9 @@
-import { followerCount, followingPage, loadPage, resetReelsSource, searchHashtag, searchReels, searchUsers, similarAccounts } from './api'
+import { followerCount, followingPage, searchUsers, similarAccounts } from './api'
+import { collectGridReels } from './capture-reels'
+import { recordTrace } from './request-log'
 import { notify, patch } from './store'
 import { isRateLimited, reelsUrl } from '../lib/batch'
 import { HttpError } from '../lib/instagram/page-data'
-import { hashtagUrl } from '../lib/instagram/search'
-import { collectPosts } from '../lib/instagram/collect'
 import { humanError } from '../lib/format'
 import { downloadName, safeSegment } from '../lib/media-files'
 import { parseSurface } from '../lib/surface'
@@ -165,11 +165,7 @@ async function readKeyword(
       hits.push({ username: account.username, followers: account.followers })
     }
   }
-  const sources: Array<() => Promise<{ username: string; followers: number | null }[]>> = [
-    () => searchUsers(keyword),
-    () => searchReels(keyword),
-    ...(hashtagUrl(keyword) ? [() => searchHashtag(keyword)] : []),
-  ]
+  const sources: Array<() => Promise<{ username: string; followers: number | null }[]>> = [() => searchUsers(keyword)]
   for (let index = 0; index < sources.length; index += 1) {
     if (signal.aborted) return { hits, limited: false, aborted: true }
     if (hits.length >= cap) break
@@ -264,38 +260,31 @@ async function runOnce(): Promise<void> {
           collected,
           label: `Snowball · @${username}`,
           percent: latest.settings.reelsPerAccount > 0 ? Math.min(100, (collected / latest.settings.reelsPerAccount) * 100) : null,
-          scrolling: false,
+          scrolling: true,
         },
       })
     }
     let followers: number | null = null
     try {
-      resetReelsSource(username)
-      const result = await collectPosts({
-        limit: latest.settings.reelsPerAccount,
-        delayMs: latest.settings.delayMs,
-        signal,
-        onProgress: (collected) => showCollecting(collected),
-        load: (maxId) => loadPage({ kind: 'reels', username }, maxId),
+      const posts = await collectGridReels(username, latest.settings.reelsPerAccount, signal, (collected) => showCollecting(collected))
+      recordTrace({
+        url: location.href,
+        status: posts.length > 0 ? 200 : 0,
+        snippet: posts.length > 0 ? `${posts.length} reels read from the page grid` : 'The page grid did not load any reels.',
       })
       try {
         followers = await followerCount(username)
       } catch {
         followers = null
       }
-      if (signal.aborted || result.stopped) {
+      if (signal.aborted) {
         await saveSnowball(pauseSnowball(latest, 'Paused.'))
         patch({ phase: { type: 'idle' } })
         notify('Snowball paused. Resume it from the research panel.')
         return
       }
-      if (result.interrupted && isRateLimited(result.interrupted)) {
-        await saveSnowball(pauseSnowball(latest, result.interrupted))
-        notify(`${result.interrupted} Resume the snowball from the research panel when Instagram has calmed down.`)
-        return
-      }
-      const error = result.posts.length === 0 ? result.interrupted || 'No reels came back. The account may be private.' : undefined
-      await saveSnowball(applyScore(latest, { username, followers, posts: result.posts, error }, Date.now()))
+      const error = posts.length === 0 ? 'No reels came back from this profile grid.' : undefined
+      await saveSnowball(applyScore(latest, { username, followers, posts, error }, Date.now()))
       snowballAgain = true
     } catch (error) {
       if (signal.aborted) {
