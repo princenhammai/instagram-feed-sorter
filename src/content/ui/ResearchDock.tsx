@@ -32,6 +32,8 @@ import {
 } from '../../lib/research-table'
 import {
   DEFAULT_SNOWBALL_REELS,
+  DEFAULT_MAX_DEPTH,
+  DEFAULT_TARGET_STRONG,
   MAX_SNOWBALL_REELS,
   SNOWBALL_KEY,
   SNOWBALL_PROGRESS_KEY,
@@ -68,6 +70,8 @@ export function ResearchDock() {
   const [seeds, setSeeds] = useState('')
   const [keywords, setKeywords] = useState('')
   const [reels, setReels] = useState(String(DEFAULT_REELS))
+  const [maxAccounts, setMaxAccounts] = useState(String(DEFAULT_TARGET_STRONG))
+  const [maxDepth, setMaxDepth] = useState(String(DEFAULT_MAX_DEPTH))
   const [edited, setEdited] = useState(false)
   const [keywordsEdited, setKeywordsEdited] = useState(false)
   const debug = useRequestLog()
@@ -97,7 +101,14 @@ export function ResearchDock() {
       ])
       hydrateTraces(stored[REQUEST_LOG_KEY])
       if (!draftReady.current) {
-        const draft = stored[DRAFT_KEY] as { seeds?: unknown; keywords?: unknown; reels?: unknown; mode?: unknown } | undefined
+        const draft = stored[DRAFT_KEY] as {
+          seeds?: unknown
+          keywords?: unknown
+          reels?: unknown
+          mode?: unknown
+          maxAccounts?: unknown
+          maxDepth?: unknown
+        } | undefined
         if (draft && typeof draft === 'object') {
           if (typeof draft.seeds === 'string') {
             setSeeds(draft.seeds)
@@ -114,9 +125,11 @@ export function ResearchDock() {
               keywordsHydrated.current = true
             }
           }
-          if (typeof draft.reels === 'string' && draft.reels.trim()) {
-            setReels(draft.reels)
+          if (typeof draft.reels === 'string' && draft.reels.replace(/\D/g, '')) {
+            setReels(draft.reels.replace(/\D/g, ''))
           }
+          if (typeof draft.maxAccounts === 'string') setMaxAccounts(draft.maxAccounts.replace(/\D/g, ''))
+          if (typeof draft.maxDepth === 'string') setMaxDepth(draft.maxDepth.replace(/\D/g, ''))
           if (draft.mode === 'batch' || draft.mode === 'snowball') setMode(draft.mode)
         }
         draftReady.current = true
@@ -159,8 +172,8 @@ export function ResearchDock() {
 
   useEffect(() => {
     if (!draftReady.current) return
-    void chrome.storage.local.set({ [DRAFT_KEY]: { seeds, keywords, reels, mode } })
-  }, [seeds, keywords, reels, mode])
+    void chrome.storage.local.set({ [DRAFT_KEY]: { seeds, keywords, reels, mode, maxAccounts, maxDepth } })
+  }, [seeds, keywords, reels, mode, maxAccounts, maxDepth])
 
   useEffect(() => {
     if (keywordsEdited || keywordsHydrated.current) return
@@ -233,7 +246,12 @@ export function ResearchDock() {
     const picked = handles.slice(0, 20)
     const job = createSnowball(
       picked,
-      { reelsPerAccount: Math.min(MAX_SNOWBALL_REELS, Math.max(1, Math.round(snowCount))), delayMs: DEFAULT_DELAY_MS },
+      {
+        reelsPerAccount: Math.min(MAX_SNOWBALL_REELS, Math.max(1, Math.round(snowCount))),
+        delayMs: DEFAULT_DELAY_MS,
+        targetStrong: countOr(maxAccounts, DEFAULT_TARGET_STRONG, 1, 200),
+        maxDepth: countOr(maxDepth, DEFAULT_MAX_DEPTH, 0, 6),
+      },
       Date.now(),
       terms,
     )
@@ -434,6 +452,10 @@ export function ResearchDock() {
             setReels(value)
           }}
           reelsMax={mode === 'batch' ? 200 : MAX_SNOWBALL_REELS}
+          maxAccounts={maxAccounts}
+          onMaxAccounts={setMaxAccounts}
+          maxDepth={maxDepth}
+          onMaxDepth={setMaxDepth}
           debug={debug}
           mode={mode}
           onMode={(next) => {
@@ -470,6 +492,14 @@ export function ResearchDock() {
       </div>
     </div>
   )
+}
+
+function countOr(value: string, fallback: number, min: number, max: number): number {
+  const digits = value.replace(/\D/g, '')
+  if (!digits) return fallback
+  const parsed = Number(digits)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.min(max, Math.max(min, Math.round(parsed)))
 }
 
 function progressFor(

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Instagram Feed Sorter",
   "description": "Sort, analyze, export, download, save, and transcribe Instagram Reels and posts while you are signed in.",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "minimum_chrome_version": "111",
   "action": {
     "default_popup": "src/popup/index.html",

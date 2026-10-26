@@ -1,4 +1,5 @@
 import { enrichPost, hasPlayableVideo, loadPage, mediaByShortcode, resetReelsSource, similarAccounts, storyPosts } from './api'
+import { nudgeReelGrid } from './capture-reels'
 import { batchIsActive, consumeBatchLeave, loadJob, markPaused, markResumed, onBatchResume, resumeBatch } from './batch-run'
 import { consumeSnowballLeave, loadSnowball, markSnowballPaused, markSnowballResumed, onSnowballResume, resumeSnowballRun, snowballIsActive } from './snowball-run'
 import { reelsUrl } from '../lib/batch'
@@ -312,6 +313,11 @@ function relevantPosts(surface: SortableSurface, posts: Post[]): Post[] {
 }
 
 function nudgeScroll(idleRounds: number): void {
+  const surface = parseSurface(location.href)
+  if ((surface.kind === 'posts' || surface.kind === 'reels') && surface.username) {
+    nudgeReelGrid(surface.username, idleRounds)
+    return
+  }
   const page = document.scrollingElement || document.documentElement
   if (idleRounds > 0 && idleRounds % 2 === 0) window.scrollBy(0, -900)
   window.scrollTo(0, page.scrollHeight)

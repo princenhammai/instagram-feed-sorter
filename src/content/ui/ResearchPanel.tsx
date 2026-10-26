@@ -1,4 +1,4 @@
-import type { SyntheticEvent } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, SyntheticEvent } from 'react'
 import { formatCount, formatMultiple, formatPercent } from '../../lib/format'
 import { TOP_DOWNLOAD, VISIBLE_CAP, type ResearchMode, type ResearchRow, type ResearchSort } from '../../lib/research-table'
 
@@ -7,9 +7,17 @@ function isolate(event: SyntheticEvent) {
   event.nativeEvent.stopImmediatePropagation()
 }
 
+function digitsOnly(value: string): string {
+  return value.replace(/\D/g, '')
+}
+
 function keepFocus(event: SyntheticEvent<HTMLTextAreaElement | HTMLInputElement>) {
   event.stopPropagation()
   event.currentTarget.focus()
+}
+
+function blockNonDigits(event: ReactKeyboardEvent<HTMLInputElement>) {
+  if (event.key.length === 1 && !/\d/.test(event.key) && !event.ctrlKey && !event.metaKey) event.preventDefault()
 }
 
 export function ResearchPanel({
@@ -20,6 +28,10 @@ export function ResearchPanel({
   reels = '100',
   onReels = () => undefined,
   reelsMax = 200,
+  maxAccounts = '20',
+  onMaxAccounts = () => undefined,
+  maxDepth = '2',
+  onMaxDepth = () => undefined,
   debug = [],
   mode,
   onMode,
@@ -50,6 +62,10 @@ export function ResearchPanel({
   reels?: string
   onReels?: (value: string) => void
   reelsMax?: number
+  maxAccounts?: string
+  onMaxAccounts?: (value: string) => void
+  maxDepth?: string
+  onMaxDepth?: (value: string) => void
   debug?: string[]
   mode: ResearchMode
   onMode: (mode: ResearchMode) => void
@@ -121,16 +137,58 @@ export function ResearchPanel({
         Reels per account
         <input
           id="ifs-reels"
-          type="number"
-          min={1}
-          max={reelsMax}
+          type="text"
           inputMode="numeric"
-          value={reels}
+          autoComplete="off"
+          maxLength={3}
+          value={digitsOnly(reels)}
           aria-label="Reels per account"
           onPointerDown={keepFocus}
-          onChange={(event) => onReels(event.target.value)}
+          onKeyDown={blockNonDigits}
+          onChange={(event) => {
+            const digits = digitsOnly(event.target.value)
+            if (!digits) {
+              onReels('')
+              return
+            }
+            onReels(String(Math.min(reelsMax, Number(digits))))
+          }}
         />
       </label>
+      {mode === 'snowball' && (
+        <div className="research-caps">
+          <label>
+            Max accounts
+            <input
+              id="ifs-max-accounts"
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={3}
+              value={digitsOnly(maxAccounts)}
+              aria-label="Max accounts"
+              onPointerDown={keepFocus}
+              onKeyDown={blockNonDigits}
+              onChange={(event) => onMaxAccounts(digitsOnly(event.target.value))}
+            />
+          </label>
+          <label>
+            Max depth
+            <input
+              id="ifs-max-depth"
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={1}
+              value={digitsOnly(maxDepth)}
+              aria-label="Max depth"
+              onPointerDown={keepFocus}
+              onKeyDown={blockNonDigits}
+              onChange={(event) => onMaxDepth(digitsOnly(event.target.value))}
+            />
+          </label>
+        </div>
+      )}
 
       <div className="segment" role="group" aria-label="Run mode">
         <button type="button" aria-pressed={mode === 'batch'} onClick={() => onMode('batch')}>
@@ -143,7 +201,7 @@ export function ResearchPanel({
       <p className="note">
         {mode === 'batch'
           ? 'Reads each profile’s Reels grid the same way Sort does, 1.2s apart. A run that finds no reels stays paused instead of exporting an empty file. Only HTTP 429 or feedback_required pauses for rate limiting.'
-          : 'Keywords use the accounts search, up to 15 accounts each, with provenance search: keyword, then the same STRONG expansion.'}
+          : 'Keywords open the search page and read the accounts it loads, up to 15 each, with provenance search: keyword. Max accounts is the STRONG target. Max depth is how far expansion goes.'}
       </p>
 
       <div className="row">

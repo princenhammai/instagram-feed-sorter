@@ -12,6 +12,7 @@ export type MainAction =
   | 'stories'
   | 'similar'
   | 'captured'
+  | 'captured-accounts'
   | 'followers'
   | 'following'
   | 'user-search'

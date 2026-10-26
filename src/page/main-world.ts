@@ -1,5 +1,5 @@
 import { extractFollowerCounts, extractItems, extractUserId, extractUsers } from '../lib/instagram/extract'
-import { accountSearchUrl, hashtagUrl, userSearchUrl } from '../lib/instagram/search'
+import { hashtagUrl } from '../lib/instagram/search'
 import { isInstagramDataUrl, mergePost, parseBodies } from '../lib/instagram/capture'
 import { normalizeMedia } from '../lib/instagram/normalize'
 import { findUserIdInText, hasFeedbackRequired, HttpError, httpFailureMessage, responseSnippet } from '../lib/instagram/page-data'
@@ -160,20 +160,9 @@ async function profile(username: string): Promise<unknown> {
     userIds.set(username.toLowerCase(), known)
     return { data: { user: { id: known } } }
   }
-  try {
-    const raw = await webProfile(username)
-    ingest(raw)
-    return raw
-  } catch (error) {
-    if (error instanceof HttpError && error.status === 429) throw error
-    const search = (await igFetch(accountSearchUrl(username)).catch(() => null)) as {
-      users?: { user?: { username?: string; pk?: unknown; pk_id?: unknown } }[]
-    } | null
-    const hit = search?.users?.find((item) => item.user?.username?.toLowerCase() === username.toLowerCase())
-    const id = hit?.user?.pk_id ?? hit?.user?.pk
-    if (id != null) return { data: { user: { id: String(id) } } }
-    throw error
-  }
+  const raw = await webProfile(username)
+  ingest(raw)
+  return raw
 }
 
 function exceptTarget(username: string, accounts: SimilarAccount[]): SimilarAccount[] {
@@ -264,8 +253,26 @@ function withMax(url: string, maxId?: string): string {
   return next.toString()
 }
 
+function capturedUserPayload(): unknown {
+  scanEmbedded()
+  return {
+    users: Array.from(capturedAccounts.values()).map((account) => ({
+      user: {
+        pk: account.id,
+        username: account.username,
+        full_name: account.fullName,
+        is_verified: account.verified,
+        is_private: account.isPrivate,
+        follower_count: account.followers,
+        profile_pic_url: account.avatarUrl,
+      },
+    })),
+  }
+}
+
 async function reelsSearch(query: string): Promise<unknown> {
-  return igFetch(userSearchUrl(query))
+  void query
+  return capturedUserPayload()
 }
 
 async function hashtagPage(query: string): Promise<unknown> {
@@ -275,18 +282,10 @@ async function hashtagPage(query: string): Promise<unknown> {
 }
 
 async function search(query: string, maxId?: string): Promise<unknown> {
-  const url = new URL(accountSearchUrl(query))
-  if (maxId) url.searchParams.set('next_max_id', maxId)
-  const primary = await igFetch(url.toString())
-  if (maxId || extractItems(primary).length > 0) return primary
-  const tag = query.replace(/^#/, '')
-  if (!/^[A-Za-z0-9._]+$/.test(tag)) return primary
-  try {
-    const secondary = await igFetch(`https://www.instagram.com/api/v1/tags/web_info/?tag_name=${encodeURIComponent(tag)}`)
-    return extractItems(secondary).length > 0 ? secondary : primary
-  } catch {
-    return primary
-  }
+  void query
+  void maxId
+  scanEmbedded()
+  return { items: Array.from(captured.values()) }
 }
 
 async function collection(id: string, maxId?: string): Promise<unknown> {
@@ -352,7 +351,7 @@ async function run(call: MainCall): Promise<unknown> {
     case 'similar':
       return similarTo(call.username || '')
     case 'user-search':
-      return igFetch(userSearchUrl(call.query || ''))
+      return capturedUserPayload()
     case 'reels-search':
       return reelsSearch(call.query || '')
     case 'hashtag':
@@ -360,6 +359,9 @@ async function run(call: MainCall): Promise<unknown> {
     case 'captured':
       scanEmbedded()
       return Array.from(captured.values())
+    case 'captured-accounts':
+      scanEmbedded()
+      return Array.from(capturedAccounts.values())
     case 'followers':
       return followers(call.username || '')
     case 'following':
@@ -390,6 +392,7 @@ function hookHistory(): void {
 }
 
 const captured = new Map<string, Post>()
+const capturedAccounts = new Map<string, SimilarAccount>()
 const followerCounts = new Map<string, number>()
 const userIds = new Map<string, string>()
 const scannedScripts = new WeakSet<Element>()
@@ -418,6 +421,11 @@ function ingest(raw: unknown): void {
   for (const item of extractItems(raw, 80)) {
     const post = normalizeMedia(item)
     if (post) captured.set(post.id, mergePost(captured.get(post.id), post))
+  }
+  for (const account of extractUsers(raw)) {
+    const key = account.username.toLowerCase()
+    const existing = capturedAccounts.get(key)
+    if (!existing || (existing.followers == null && account.followers != null)) capturedAccounts.set(key, account)
   }
   for (const [username, count] of extractFollowerCounts(raw)) followerCounts.set(username, count)
   rememberIds(raw)
