@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { samplePost } from './sample'
 import {
+  accountCaptureMs,
+  ACCOUNT_CAPTURE_MAX_MS,
   allowProgressPaint,
+  GRID_IDLE_ROUNDS,
   gridCaptureSnippet,
   postsForSurface,
   runSortCapture,
@@ -93,6 +96,59 @@ describe('runSortCapture', () => {
     expect(result.timedOut).toBe(true)
     expect(result.posts.map((post) => post.shortcode)).toEqual(['p0'])
     expect(reads).toBe(1)
+    expect(result.pages).toBe(1)
+  })
+
+  it('waits out an in-flight request and keeps the next page', async () => {
+    const first = Array.from({ length: 5 }, (_, index) => reel(`p${index}`, 1_000 + index))
+    const second = [...first, ...Array.from({ length: 12 }, (_, index) => reel(`n${index}`, 2_000 + index))]
+    let stage = 0
+    let inflight = 0
+    let sleeps = 0
+    const result = await runSortCapture({
+      read: async () => (stage === 0 ? first : second),
+      nudge: () => {
+        inflight = 1
+      },
+      inFlight: async () => {
+        if (inflight > 0 && sleeps >= 4) {
+          inflight = 0
+          stage = 1
+        }
+        return inflight
+      },
+      sleep: async () => {
+        sleeps += 1
+        return true
+      },
+      roundWaitMs: 2_500,
+      idleRounds: 3,
+      limit: 30,
+      signal: new AbortController().signal,
+    })
+    expect(result.posts).toHaveLength(17)
+    expect(result.pages).toBe(2)
+    expect(result.timedOut).toBe(false)
+    expect(sleeps).toBeGreaterThanOrEqual(4)
+  })
+
+  it('needs ten quiet rounds when the grid capture asks for them', async () => {
+    const page = Array.from({ length: 16 }, (_, index) => reel(`p${index}`, index))
+    let reads = 0
+    const result = await runSortCapture({
+      read: async () => {
+        reads += 1
+        return page
+      },
+      nudge: () => undefined,
+      sleep: async () => true,
+      idleRounds: GRID_IDLE_ROUNDS,
+      limit: 30,
+      signal: new AbortController().signal,
+    })
+    expect(result.posts).toHaveLength(16)
+    expect(result.pages).toBe(1)
+    expect(reads).toBe(1 + GRID_IDLE_ROUNDS)
   })
 })
 
@@ -113,12 +169,16 @@ describe('grid capture notes', () => {
 
   it('describes a timeout without pretending the grid never loaded', () => {
     expect(gridCaptureSnippet(5, false)).toEqual({ status: 200, snippet: '5 reels read from the page grid' })
-    expect(gridCaptureSnippet(5, true).snippet).toContain('stopped at 90s')
+    expect(gridCaptureSnippet(16, false, 2).snippet).toBe('16 reels read from the page grid (2 pages)')
+    expect(gridCaptureSnippet(5, true, 1).snippet).toContain('stopped at 90s')
     expect(gridCaptureSnippet(0, true)).toEqual({
       status: 0,
       snippet: 'Timed out after 90s. No reels were captured.',
     })
     expect(gridCaptureSnippet(0, false).snippet).toBe('No reels were captured from this profile.')
+    expect(accountCaptureMs(30)).toBe(90_000)
+    expect(accountCaptureMs(100)).toBe(300_000)
+    expect(accountCaptureMs(200)).toBe(ACCOUNT_CAPTURE_MAX_MS)
   })
 
   it('throttles progress paints', () => {

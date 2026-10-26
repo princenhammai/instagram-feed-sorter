@@ -1,7 +1,7 @@
 import { followerCount } from './api'
 import { collectGridReels } from './capture-reels'
 import { recordTrace } from './request-log'
-import { allowProgressPaint, gridCaptureSnippet } from '../lib/sort-capture'
+import { accountCaptureMs, allowProgressPaint, gridCaptureSnippet } from '../lib/sort-capture'
 import { getSnap, notify, patch, type BatchProgress } from './store'
 import {
   BATCH_KEY,
@@ -246,7 +246,7 @@ async function runOnce(): Promise<void> {
     const captured = await collectGridReels(handle, latest.reelsPerAccount, signal, (collected) => showCollecting(collected))
     const posts = captured.posts
     showCollecting(posts.length, true)
-    const trace = gridCaptureSnippet(posts.length, captured.timedOut)
+    const trace = gridCaptureSnippet(posts.length, captured.timedOut, captured.pages, accountCaptureMs(latest.reelsPerAccount))
     recordTrace({ url: location.href, status: trace.status, snippet: trace.snippet })
     try {
       followers = await followerCount(handle)

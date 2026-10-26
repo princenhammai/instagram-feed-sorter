@@ -13,6 +13,7 @@ export type MainAction =
   | 'similar'
   | 'captured'
   | 'captured-accounts'
+  | 'capture-pulse'
   | 'search-hits'
   | 'followers'
   | 'following'

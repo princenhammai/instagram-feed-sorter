@@ -145,10 +145,13 @@ describe('snowball graph', () => {
     expect(finished.queue.every((item) => item.depth === 0)).toBe(true)
   })
 
-  it('stops once the strong target is reached', () => {
-    const finished = walk(createSnowball(['ada', 'bob'], { targetStrong: 1, maxDepth: 2 }, DAY), graph)
-    expect(finished.accounts.map((account) => account.username)).toEqual(['ada'])
-    expect(finished.note).toBe('Reached 1 STRONG account.')
+  it('scores depth 0, then expands STRONG accounts up to the cap', () => {
+    const finished = walk(createSnowball(['ada', 'bob'], { targetStrong: 1, maxDepth: 2, minStrongRatio: 0 }, DAY), graph)
+    expect(finished.accounts.map((account) => account.username)).toEqual(['ada', 'bob', 'cara', 'dan', 'eve'])
+    expect(finished.expanded).toEqual(['ada'])
+    expect(finished.accounts.find((account) => account.username === 'cara')?.depth).toBe(1)
+    expect(finished.accounts.some((account) => account.username === 'finn')).toBe(false)
+    expect(finished.note).toBe('Expanded 1 STRONG account.')
   })
 
   it('drops candidates outside the follower range and keeps unknown counts', () => {

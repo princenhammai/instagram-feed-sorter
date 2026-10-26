@@ -7,7 +7,7 @@ import { isRateLimited, reelsUrl } from '../lib/batch'
 import { humanError } from '../lib/format'
 import { downloadName, safeSegment } from '../lib/media-files'
 import { isKeywordSearchPage, keywordSearchUrl, searchCaptureNote } from '../lib/page-accounts'
-import { allowProgressPaint, gridCaptureSnippet } from '../lib/sort-capture'
+import { accountCaptureMs, allowProgressPaint, gridCaptureSnippet } from '../lib/sort-capture'
 import { parseSurface } from '../lib/surface'
 import { SYNC_KEY, cleanSync, notionReady, type SummarySyncRow, type SyncSettings } from '../lib/sync'
 import {
@@ -275,7 +275,7 @@ async function runOnce(): Promise<void> {
       const captured = await collectGridReels(username, latest.settings.reelsPerAccount, signal, (collected) => showCollecting(collected))
       const posts = captured.posts
       showCollecting(posts.length, true)
-      const trace = gridCaptureSnippet(posts.length, captured.timedOut)
+      const trace = gridCaptureSnippet(posts.length, captured.timedOut, captured.pages, accountCaptureMs(latest.settings.reelsPerAccount))
       recordTrace({
         url: location.href,
         status: trace.status,

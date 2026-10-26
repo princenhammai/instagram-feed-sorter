@@ -160,7 +160,7 @@ export function ResearchPanel({
       {mode === 'snowball' && (
         <div className="research-caps">
           <label>
-            Max accounts
+            Max to expand
             <input
               id="ifs-max-accounts"
               type="text"
@@ -168,7 +168,7 @@ export function ResearchPanel({
               autoComplete="off"
               maxLength={3}
               value={digitsOnly(maxAccounts)}
-              aria-label="Max accounts"
+              aria-label="Max STRONG accounts to expand"
               onPointerDown={keepFocus}
               onKeyDown={blockNonDigits}
               onChange={(event) => onMaxAccounts(digitsOnly(event.target.value))}
@@ -203,7 +203,7 @@ export function ResearchPanel({
       <p className="note">
         {mode === 'batch'
           ? 'Reads each profile’s Reels grid the same way Sort does, 1.2s apart. A run that finds no reels stays paused instead of exporting an empty file. Only HTTP 429 or feedback_required pauses for rate limiting.'
-          : 'Keywords open the search page and read the accounts in the results, up to 15 each, with provenance search: keyword. Those handles are listed here. Max accounts is the STRONG target. Max depth is how far expansion goes.'}
+          : 'Keywords open the search page and read the accounts in the results, up to 15 each, with provenance search: keyword. Those handles are listed here. Max to expand is how many STRONG accounts are opened to discover more, after every seed and keyword account is scored. Expansion then runs until that many are opened or max depth is reached. The daily cap is the total scored-account limit.'}
       </p>
 
       <div className="row">

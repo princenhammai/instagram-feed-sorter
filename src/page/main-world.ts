@@ -365,6 +365,8 @@ async function run(call: MainCall): Promise<unknown> {
       return Array.from(capturedAccounts.values())
     case 'search-hits':
       return Array.from(searchHits.values())
+    case 'capture-pulse':
+      return { inflight: inflightData, pages: mediaPages }
     case 'followers':
       return followers(call.username || '')
     case 'following':
@@ -397,6 +399,18 @@ function hookHistory(): void {
 const captured = new Map<string, Post>()
 const capturedAccounts = new Map<string, SimilarAccount>()
 const searchHits = new Map<string, SimilarAccount>()
+let inflightData = 0
+let mediaPages = 0
+
+function finishInflight(): void {
+  inflightData = Math.max(0, inflightData - 1)
+}
+
+function ingestTracked(text: string, meta?: { url: string; body: string }): void {
+  const before = captured.size
+  ingestText(text, meta)
+  if (captured.size > before) mediaPages += 1
+}
 const followerCounts = new Map<string, number>()
 const userIds = new Map<string, string>()
 const scannedScripts = new WeakSet<Element>()
@@ -507,21 +521,25 @@ function requestUrl(input: unknown): string {
 function hookNetwork(): void {
   const originalFetch = window.fetch
   window.fetch = async function (this: unknown, ...args: Parameters<typeof fetch>) {
-    const response = await originalFetch.apply(this, args)
+    const url = requestUrl(args[0])
+    const tracked = isInstagramDataUrl(url, location.href)
+    if (tracked) inflightData += 1
     try {
-      const url = requestUrl(args[0])
-      if (isInstagramDataUrl(url, location.href)) {
+      const response = await originalFetch.apply(this, args)
+      if (tracked) {
         const body = bodyText(args[1]?.body)
         response
           .clone()
           .text()
-          .then((text) => ingestText(text, { url, body }))
+          .then((text) => ingestTracked(text, { url, body }))
           .catch(() => undefined)
+          .finally(finishInflight)
       }
-    } catch {
-      // Never break Instagram's own requests.
+      return response
+    } catch (error) {
+      if (tracked) finishInflight()
+      throw error
     }
-    return response
   } as typeof fetch
 
   type TaggedRequest = XMLHttpRequest & { __ifsUrl?: string }
@@ -535,18 +553,32 @@ function hookNetwork(): void {
   proto.send = function (this: TaggedRequest, body?: Document | XMLHttpRequestBodyInit | null) {
     const url = this.__ifsUrl || ''
     const sent = bodyText(body)
-    if (url && isInstagramDataUrl(url, location.href)) {
+    const tracked = Boolean(url && isInstagramDataUrl(url, location.href))
+    if (tracked) {
+      inflightData += 1
+      let settled = false
+      const done = () => {
+        if (settled) return
+        settled = true
+        finishInflight()
+      }
       this.addEventListener('load', () => {
         try {
+          const before = captured.size
           if (this.responseType === '' || this.responseType === 'text') ingestText(this.responseText, { url, body: sent })
           else if (this.responseType === 'json') {
             ingest(this.response)
             rememberSearch(this.response, url, sent)
           }
+          if (captured.size > before) mediaPages += 1
         } catch {
           // Ignore responses we cannot read.
+        } finally {
+          done()
         }
       })
+      this.addEventListener('error', done)
+      this.addEventListener('abort', done)
     }
     return send.call(this, body)
   }

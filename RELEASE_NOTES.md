@@ -1,3 +1,35 @@
+# Instagram Feed Sorter v0.4.6
+
+Batch and snowball keep the reels from the first response, scroll the last reel tile into view, and wait for the next page before counting a round as quiet. Ten quiet rounds, or a time limit of 90 seconds or 3 seconds per target reel (at most 5 minutes), end an account. The request log includes the pages fetched. Snowball scores every seed and keyword account, then expands STRONG accounts up to Max to expand and through max depth. The daily cap is the total scored-account limit. Still read-only. No new paid service and no Instagram writes.
+
+## Install the extension
+
+Download **instagram-feed-sorter-v0.4.6.zip** and **SHA256SUMS.txt**. From the folder that contains both, run `sha256sum -c SHA256SUMS.txt`. Extract the extension zip, then use Developer mode → Load unpacked in desktop Chrome or Edge. Select the folder that contains `manifest.json`. The manifest version is **0.4.6**. Sign in to Instagram yourself and open a profile's Reels tab. Reload the extension after replacing an older unpacked folder, then refresh Instagram.
+
+No Node.js, API key, or server is needed for sorting, batching, snowball research, or file export. This is a desktop Chromium build.
+
+## Install the video breakdown CLI
+
+Download **instagram-feed-sorter-breakdown-v0.4.6.zip**. It contains `breakdown.py`, `requirements.txt`, and `INSTALL.md`. ffmpeg and ffprobe are required. tesseract and faster-whisper are optional and free. Follow `INSTALL.md` inside the zip. This script is experimental.
+
+## Quickstart
+
+- **Research panel.** On an Instagram tab, choose Research. Paste handles. Snowball also has a Keywords field, plus Max to expand (20) and Max depth (2). Max to expand is how many STRONG accounts are opened after the seeds and keyword accounts are scored. Set Reels per account (100 for batch, 30 for snowball). That count stays after Run, and the number fields accept digits only. Run Batch or Snowball. Keyword accounts are listed under the progress line. The results table sorts by × median, engagement, or views, and hides paid reels until you show them. Snowball rows show provenance such as `search: keyword`. Export, Download top 10, and Sync are one click. Resume stays on the panel.
+- **Request log.** Each account line shows the HTTP status, URL, reel count, and pages fetched, for example `30 reels read from the page grid (4 pages)`. A skip names the time limit when the account did not finish.
+- **Batch runner.** Each account scrolls the last reel into view and waits for the next network response. The account ends at the target, after ten quiet rounds, or at the scaled time limit. If every account comes back empty, the batch stays paused and does not save an empty export.
+- **Account finder.** On a profile or Reels tab, Find accounts stays on the right.
+- **Sheets and Notion.** Options page. Both stay off until you enable them. Notion uses a token stored only in this browser.
+- **Video breakdown.** Download top N, then `python3 breakdown.py "rank01_ada_AbC.mp4" --out breakdowns --whisper-model tiny`.
+
+## Included
+
+- The grid capture scrolls the last reel link into view and the window to the bottom. A round waits 2.5 seconds and stays open while a data request is in flight. Ten rounds with no new reels end the account.
+- The per-account limit is 90 seconds, or 3 seconds for each target reel, and at most 5 minutes. The request log records pages fetched.
+- Max to expand no longer finishes a snowball when that many STRONG accounts have been scored. Depth 0 is scored, then STRONG accounts are expanded until that cap or max depth. The daily cap still limits how many accounts are scored.
+- v0.4.5, below, is included.
+
+For updates, replace files in the same loaded folder, reload the extension, then refresh Instagram. Check `SHA256SUMS.txt` against every asset on this release. A folder that still says manifest 0.4.5 is an older build.
+
 # Instagram Feed Sorter v0.4.5
 
 Batch and snowball use the v0.3.2 Sort capture again: the window scroll, the same waits, and the reels already returned with the first response. A profile that is still short after 90 seconds is skipped and the batch continues. Keyword handles from the search results are listed on the panel and in the request log. Sidebar and suggested accounts are not treated as search hits. Still read-only. No new paid service and no Instagram writes.

@@ -318,11 +318,6 @@ export function plan(job: SnowballJob, now = Date.now()): { job: SnowballJob; st
       current = pauseSnowball(current, 'Daily cap reached. Resume on the next UTC day.', now)
       return { job: current, step: { type: 'pause', note: current.note } }
     }
-    if (countStrong(current) >= current.settings.targetStrong) {
-      const found = countStrong(current)
-      current = finishSnowball(current, `Reached ${found} STRONG ${found === 1 ? 'account' : 'accounts'}.`, now)
-      return { job: current, step: { type: 'done', note: current.note } }
-    }
     if (current.phase === 'search') {
       const keyword = nextKeyword(current)
       if (keyword) return { job: current, step: { type: 'search', keyword } }
@@ -346,12 +341,17 @@ export function plan(job: SnowballJob, now = Date.now()): { job: SnowballJob; st
       current = { ...current, phase: 'expand', updatedAt: now }
       continue
     }
-    const next = nextStrongToExpand(current)
+    const capped = current.expanded.length >= current.settings.targetStrong
+    const next = capped ? null : nextStrongToExpand(current)
     if (next) return { job: current, step: { type: 'expand', username: next } }
     const depth = current.depth + 1
     current = { ...current, depth, phase: 'score', roundScored: 0, roundStrong: 0, updatedAt: now }
     if (!current.queue.some((item) => item.depth === depth)) {
-      current = finishSnowball(current, 'No further accounts to score.', now)
+      const expanded = current.expanded.length
+      const note = capped
+        ? `Expanded ${expanded} STRONG ${expanded === 1 ? 'account' : 'accounts'}.`
+        : 'No further accounts to score.'
+      current = finishSnowball(current, note, now)
       return { job: current, step: { type: 'done', note: current.note } }
     }
   }
@@ -525,7 +525,7 @@ export function progressLabel(job: SnowballJob): string {
   const searched = job.searched ?? []
   const head = job.phase === 'search' ? `Search ${searched.length}/${keywords.length}` : `Depth ${job.depth}`
   const note = job.searchNote ? ` · ${job.searchNote}` : ''
-  return `${head} · ${countStrong(job)}/${job.settings.targetStrong} STRONG · ${job.scoredToday}/${job.settings.dailyCap} today${note}`
+  return `${head} · ${countStrong(job)} STRONG · expanded ${job.expanded.length}/${job.settings.targetStrong} · ${job.scoredToday}/${job.settings.dailyCap} today${note}`
 }
 
 function roundRate(value: number | null): number | null {
