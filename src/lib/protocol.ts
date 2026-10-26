@@ -14,6 +14,9 @@ export type MainAction =
   | 'captured'
   | 'followers'
   | 'following'
+  | 'user-search'
+  | 'reels-search'
+  | 'hashtag'
 
 export interface MainCall {
   action: MainAction

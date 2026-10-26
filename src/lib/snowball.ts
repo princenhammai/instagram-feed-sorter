@@ -19,12 +19,14 @@ export const DEFAULT_STRONG_MEDIAN = 10_000
 export const DEFAULT_MAYBE_BREAKOUTS = 1
 export const DEFAULT_MAYBE_MEDIAN = 1_000
 export const MAX_SEEDS = 20
+export const MAX_KEYWORDS = 10
+export const DEFAULT_SEARCH_CAP = 15
 export const MAX_QUEUE = 300
 
 const RESERVED = new Set(['explore', 'reels', 'reel', 'p', 'stories', 'accounts', 'direct', 'about', 'legal'])
 
 export type Grade = 'STRONG' | 'MAYBE' | 'WEAK' | 'ERROR'
-export type CandidateVia = 'following' | 'suggested'
+export type CandidateVia = 'following' | 'suggested' | 'search'
 
 export interface SnowballSettings {
   reelsPerAccount: number
@@ -42,6 +44,7 @@ export interface SnowballSettings {
   dailyCap: number
   minFollowers: number | null
   maxFollowers: number | null
+  searchCap: number
 }
 
 export interface SourceRef {
@@ -77,7 +80,7 @@ export interface SnowballJob {
   settings: SnowballSettings
   status: 'running' | 'paused' | 'done'
   note?: string
-  phase: 'score' | 'expand'
+  phase: 'search' | 'score' | 'expand'
   depth: number
   roundScored: number
   roundStrong: number
@@ -88,12 +91,16 @@ export interface SnowballJob {
   expanded: string[]
   accounts: ScoredAccount[]
   seeds: string[]
+  keywords: string[]
+  searched: string[]
+  searchNote?: string
   updatedAt: number
 }
 
 export interface SnowballStep {
-  type: 'score' | 'expand' | 'pause' | 'done'
+  type: 'search' | 'score' | 'expand' | 'pause' | 'done'
   username?: string
+  keyword?: string
   depth?: number
   note?: string
 }
@@ -109,6 +116,11 @@ export interface IncomingCandidate {
   username: string
   followers: number | null
   via: CandidateVia
+}
+
+export interface SearchHit {
+  username: string
+  followers: number | null
 }
 
 const DEFAULTS: SnowballSettings = {
@@ -127,6 +139,7 @@ const DEFAULTS: SnowballSettings = {
   dailyCap: DEFAULT_DAILY_CAP,
   minFollowers: null,
   maxFollowers: null,
+  searchCap: DEFAULT_SEARCH_CAP,
 }
 
 function clampInt(value: number | null | undefined, fallback: number, min: number, max: number): number {
@@ -162,6 +175,7 @@ export function snowballSettings(input: Partial<SnowballSettings> = {}): Snowbal
     dailyCap: clampInt(input.dailyCap, DEFAULTS.dailyCap, 1, 200),
     minFollowers: optionalCount(input.minFollowers),
     maxFollowers: optionalCount(input.maxFollowers),
+    searchCap: clampInt(input.searchCap, DEFAULTS.searchCap, 1, 40),
   }
 }
 
@@ -183,11 +197,39 @@ export function provenanceText(sources: SourceRef[]): string {
   const parts = [
     unique('following').length ? `followed by ${unique('following').join(', ')}` : '',
     unique('suggested').length ? `suggested by ${unique('suggested').join(', ')}` : '',
+    ...unique('search').map((keyword) => `search: ${keyword}`),
   ].filter(Boolean)
   return parts.join('; ')
 }
 
-export function createSnowball(seeds: string[], input: Partial<SnowballSettings> = {}, now = Date.now()): SnowballJob {
+export function parseKeywords(text: string): string[] {
+  const found: string[] = []
+  const seen = new Set<string>()
+  for (const chunk of text.split(/[\n,;]+/)) {
+    const keyword = chunk.trim().replace(/\s+/g, ' ')
+    if (!keyword || keyword.length > 80) continue
+    const key = keyword.toLowerCase()
+    if (seen.has(key) || found.length >= MAX_KEYWORDS) continue
+    seen.add(key)
+    found.push(keyword)
+  }
+  return found
+}
+
+function priority(sources: SourceRef[]): number {
+  return new Set(sources.filter((source) => source.via !== 'search').map((source) => source.from.toLowerCase())).size
+}
+
+function normalizeJob(job: SnowballJob): SnowballJob {
+  return {
+    ...job,
+    keywords: Array.isArray(job.keywords) ? job.keywords : [],
+    searched: Array.isArray(job.searched) ? job.searched : [],
+    settings: { ...snowballSettings(), ...job.settings, searchCap: job.settings?.searchCap ?? DEFAULT_SEARCH_CAP },
+  }
+}
+
+export function createSnowball(seeds: string[], input: Partial<SnowballSettings> = {}, now = Date.now(), keywords: string[] = []): SnowballJob {
   const settings = snowballSettings(input)
   const queue: QueueItem[] = []
   const seen: string[] = []
@@ -196,11 +238,12 @@ export function createSnowball(seeds: string[], input: Partial<SnowballSettings>
     seen.push(seed.toLowerCase())
     queue.push({ username: seed, depth: 0, score: 0, followers: null, sources: [] })
   }
+  const terms = parseKeywords(keywords.join('\n'))
   return {
     id: `snowball-${now}`,
     settings,
     status: 'running',
-    phase: 'score',
+    phase: terms.length > 0 ? 'search' : 'score',
     depth: 0,
     roundScored: 0,
     roundStrong: 0,
@@ -211,6 +254,8 @@ export function createSnowball(seeds: string[], input: Partial<SnowballSettings>
     expanded: [],
     accounts: [],
     seeds: queue.map((item) => item.username),
+    keywords: terms,
+    searched: [],
     updatedAt: now,
   }
 }
@@ -258,9 +303,14 @@ function nextStrongToExpand(job: SnowballJob): string | null {
   return account?.username ?? null
 }
 
+function nextKeyword(job: SnowballJob): string | undefined {
+  const done = new Set((job.searched ?? []).map((keyword) => keyword.toLowerCase()))
+  return (job.keywords ?? []).find((keyword) => !done.has(keyword.toLowerCase()))
+}
+
 export function plan(job: SnowballJob, now = Date.now()): { job: SnowballJob; step: SnowballStep } {
-  let current = refreshDay(job, now)
-  for (let hop = 0; hop < 8; hop += 1) {
+  let current = refreshDay(normalizeJob(job), now)
+  for (let hop = 0; hop < 12; hop += 1) {
     if (current.status !== 'running') {
       return { job: current, step: { type: current.status === 'paused' ? 'pause' : 'done', note: current.note || current.status } }
     }
@@ -272,6 +322,12 @@ export function plan(job: SnowballJob, now = Date.now()): { job: SnowballJob; st
       const found = countStrong(current)
       current = finishSnowball(current, `Reached ${found} STRONG ${found === 1 ? 'account' : 'accounts'}.`, now)
       return { job: current, step: { type: 'done', note: current.note } }
+    }
+    if (current.phase === 'search') {
+      const keyword = nextKeyword(current)
+      if (keyword) return { job: current, step: { type: 'search', keyword } }
+      current = { ...current, phase: 'score', updatedAt: now }
+      continue
     }
     if (current.phase === 'score') {
       const pending = pendingAtDepth(current)
@@ -381,7 +437,7 @@ export function applyCandidates(job: SnowballJob, fromUsername: string, incoming
       if (!existing.sources.some((item) => item.from.toLowerCase() === source.from.toLowerCase() && item.via === source.via)) {
         existing.sources.push(source)
       }
-      existing.score = new Set(existing.sources.map((item) => item.from.toLowerCase())).size
+      existing.score = priority(existing.sources)
       if (existing.followers == null && candidate.followers != null) existing.followers = candidate.followers
       seen.add(key)
       continue
@@ -399,6 +455,52 @@ export function applyCandidates(job: SnowballJob, fromUsername: string, incoming
   return { ...job, queue, seen: [...seen], updatedAt: now }
 }
 
+export function applySearchCandidates(job: SnowballJob, keyword: string, hits: SearchHit[], now = Date.now(), done = true): SnowballJob {
+  const current = normalizeJob(job)
+  const label = keyword.trim().replace(/\s+/g, ' ')
+  if (!label) return current
+  let queue = current.queue.map((item) => ({ ...item, sources: [...item.sources] }))
+  const seen = new Set(current.seen)
+  const seeds = new Set(current.seeds.map((seed) => seed.toLowerCase()))
+  const cap = current.settings.searchCap
+  let fromKeyword = queue.filter((item) =>
+    item.sources.some((source) => source.via === 'search' && source.from.toLowerCase() === label.toLowerCase()),
+  ).length
+  for (const hit of hits) {
+    if (!usableUsername(hit.username)) continue
+    const key = hit.username.toLowerCase()
+    if (seeds.has(key) || !allowsFollowers(hit.followers, current.settings)) continue
+    const source: SourceRef = { from: label, via: 'search' }
+    const existing = queue.find((item) => item.username.toLowerCase() === key)
+    if (existing) {
+      if (!existing.sources.some((item) => item.via === 'search' && item.from.toLowerCase() === label.toLowerCase())) {
+        existing.sources.push(source)
+      }
+      existing.score = priority(existing.sources)
+      if (existing.followers == null && hit.followers != null) existing.followers = hit.followers
+      seen.add(key)
+      continue
+    }
+    if (seen.has(key) || current.accounts.some((account) => account.username.toLowerCase() === key)) continue
+    if (fromKeyword >= cap || queue.length >= MAX_QUEUE) continue
+    fromKeyword += 1
+    seen.add(key)
+    queue.push({
+      username: hit.username,
+      depth: 0,
+      score: 0,
+      followers: hit.followers,
+      sources: [source],
+    })
+  }
+  const searched = current.searched.some((item) => item.toLowerCase() === label.toLowerCase())
+    ? current.searched
+    : done
+      ? [...current.searched, label]
+      : current.searched
+  return { ...current, queue, seen: [...seen], searched, updatedAt: now }
+}
+
 export function markExpanded(job: SnowballJob, username: string, now = Date.now()): SnowballJob {
   const key = username.toLowerCase()
   if (job.expanded.includes(key)) return job
@@ -406,7 +508,11 @@ export function markExpanded(job: SnowballJob, username: string, now = Date.now(
 }
 
 export function progressLabel(job: SnowballJob): string {
-  return `Depth ${job.depth} · ${countStrong(job)}/${job.settings.targetStrong} STRONG · ${job.scoredToday}/${job.settings.dailyCap} today`
+  const keywords = job.keywords ?? []
+  const searched = job.searched ?? []
+  const head = job.phase === 'search' ? `Search ${searched.length}/${keywords.length}` : `Depth ${job.depth}`
+  const note = job.searchNote ? ` · ${job.searchNote}` : ''
+  return `${head} · ${countStrong(job)}/${job.settings.targetStrong} STRONG · ${job.scoredToday}/${job.settings.dailyCap} today${note}`
 }
 
 function roundRate(value: number | null): number | null {

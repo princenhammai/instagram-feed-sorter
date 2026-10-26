@@ -28,12 +28,12 @@ Each tool uses the Instagram session already in this browser. None of them like,
 
 1. Open Instagram and sign in.
 2. Choose **Research** on the page, or **Open research** in the extension popup.
-3. Paste seed handles. Choose **Batch** or **Snowball**. Choose **Run**.
+3. Paste seed handles. For Snowball, add keywords too. Choose **Batch** or **Snowball**, then **Run**.
 4. Progress stays in the panel. **Pause** and **Resume** are on that same panel. A reload continues the saved run. Errors stay on the panel.
 5. The results table sorts by × median (the default), engagement, or views. Paid reels are hidden until you check **Show paid**.
 6. **Export** saves an Excel file of the rows you are looking at. **Download top 10** saves those videos. **Sync** sends them to Google Sheets or Notion when that option is already on.
 
-Batch loads 100 Reels per account, 1.2 seconds apart, using the same Reels request as a single-profile sort. It does not ask for the follower count before the first Reel page. If Instagram returns HTTP 429, the panel waits 15 seconds, then 30, then 60, and shows the status plus Instagram's message. Snowball scores 30 Reels, expands only STRONG accounts, and stops at 20 STRONG accounts, depth 2, or a round under 20% STRONG. Those snowball thresholds are fixed for this pass.
+Batch loads 100 Reels per account, 1.2 seconds apart, using the same Reels request as a single-profile sort. It does not ask for the follower count before the first Reel page. If Instagram returns HTTP 429, the panel waits 15 seconds, then 30, then 60, and shows the status plus Instagram's message. Snowball scores 30 Reels, expands only STRONG accounts, and stops at 20 STRONG accounts, depth 2, or a round under 20% STRONG. A keyword list is searched first: up to 10 keywords, 15 accounts each, from the accounts tab and from Reels or hashtag results when Instagram returns them. Those accounts join round 0 with provenance `search: <keyword>`. The same delay applies between search requests. Those snowball thresholds are fixed for this pass.
 
 Handles are typed in the on-page panel. The popup only opens that panel and can resume a paused run, so a popup reload cannot drop the first character into the Reel count.
 
@@ -94,7 +94,7 @@ The tab visits each profile's Reels page and reads Reels with the same loader a 
 
 ## Snowball research
 
-The short version is under Quickstart. The panel uses these defaults and does not expose a threshold form. Paste 10–20 handles. The crawl scores one account at a time from its Reels (default 30, up to 100), then classifies it:
+The short version is under Quickstart. The panel uses these defaults and does not expose a threshold form. Paste 10–20 handles, and optionally up to 10 keywords. The crawl searches each keyword before scoring. It reads the accounts tab first, then Reels search, then the hashtag page when the keyword is a single tag. It keeps up to 15 accounts per keyword and stops calling the later sources once that cap is full. It waits the same delay between those requests, and does not follow, like, comment, or message. Accounts already in the seed list are not added again. A new account is queued at depth 0 with provenance `search: barber`. The same account found for a second keyword is still one candidate, with provenance `search: barber; search: fade`. The crawl then scores one account at a time from its Reels (default 30, up to 100), then classifies it:
 
 - **STRONG** when unpaid Reels at or above 3× that account's median views meet your count (default 2) and the median itself meets your floor (default 10,000). Leave the engagement percent blank to skip that check. A value of `1` requires a median engagement rate of at least 1%.
 - **MAYBE** when the account misses STRONG but still has at least one unpaid 3× Reel and a median of at least 1,000 views.
@@ -104,9 +104,9 @@ A Reel with `#ad`, `#sponsored`, `#paidpartnership`, or Instagram's paid-partner
 
 Only STRONG accounts are expanded. The crawl reads up to 40 following accounts and up to 20 suggested accounts, waits at least 400 ms between requests (default 1200), and does not follow, like, comment, or message. Handles already seeded, queued, or scored are not added again. A candidate's priority is how many distinct STRONG accounts follow or suggest it. Optional minimum and maximum follower counts skip candidates whose count is known and outside the range; a missing count is kept.
 
-Depth 0 is the seed list. Each expansion adds the next depth. The crawl stops when the STRONG target is reached (default 20), the depth cap is reached (default 2), or a finished depth is under the STRONG ratio (default 20%). It also pauses at the daily cap (default 40 scored accounts per UTC day) and continues when you resume on a later UTC day. Seen handles, the queue, scores, sources, and depth are stored in `chrome.storage.local`, so a reload or crash resumes the same crawl.
+Depth 0 is the seed list plus the keyword accounts. Each expansion adds the next depth. The crawl stops when the STRONG target is reached (default 20), the depth cap is reached (default 2), or a finished depth is under the STRONG ratio (default 20%). It also pauses at the daily cap (default 40 scored accounts per UTC day) and continues when you resume on a later UTC day. A rate limit during search pauses on that keyword and keeps accounts already read. Seen handles, the queue, scores, sources, keywords, and depth are stored in `chrome.storage.local`, so a reload or crash resumes the same crawl.
 
-The export is a CSV and an Excel workbook with an Accounts sheet and a Queue sheet. Provenance reads `seed`, `followed by A, B`, or `suggested by A`. If Sheets or Notion is already enabled, the same finish step can create a Sheet or send summary rows. Notion maps `Grade` and `Provenance` only when the database has rich text properties with those names.
+The export is a CSV and an Excel workbook with an Accounts sheet and a Queue sheet. Provenance reads `seed`, `search: barber`, `followed by A, B`, or `suggested by A`. If Sheets or Notion is already enabled, the same finish step can create a Sheet or send summary rows. Notion maps `Grade` and `Provenance` only when the database has rich text properties with those names.
 
 ## Account finder
 

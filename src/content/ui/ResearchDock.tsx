@@ -33,6 +33,7 @@ import {
   SNOWBALL_KEY,
   SNOWBALL_PROGRESS_KEY,
   createSnowball,
+  parseKeywords,
   isSnowballJob,
   plan,
   progressLabel,
@@ -59,7 +60,9 @@ export function ResearchDock() {
   const snap = useSnap()
   const [open, setOpen] = useState(false)
   const [seeds, setSeeds] = useState('')
+  const [keywords, setKeywords] = useState('')
   const [edited, setEdited] = useState(false)
+  const [keywordsEdited, setKeywordsEdited] = useState(false)
   const [mode, setMode] = useState<ResearchMode>('batch')
   const [batchJob, setBatchJob] = useState<BatchJob | null>(null)
   const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null)
@@ -71,6 +74,7 @@ export function ResearchDock() {
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState<'' | 'export' | 'download' | 'sync'>('')
   const hydrated = useRef<{ batch: boolean; snowball: boolean }>({ batch: false, snowball: false })
+  const keywordsHydrated = useRef(false)
 
   useEffect(() => {
     const load = async () => {
@@ -111,6 +115,14 @@ export function ResearchDock() {
     setSeeds(next)
   }, [mode, batchJob, snowJob, edited])
 
+  useEffect(() => {
+    if (keywordsEdited || keywordsHydrated.current) return
+    const next = snowJob?.keywords?.join('\n')
+    if (!next) return
+    keywordsHydrated.current = true
+    setKeywords(next)
+  }, [snowJob, keywordsEdited])
+
   const activeJob = mode === 'batch' ? batchJob : snowJob
   const running = activeJob?.status === 'running'
   const paused = activeJob?.status === 'paused'
@@ -139,8 +151,13 @@ export function ResearchDock() {
     setAlert('')
     setStatus('')
     const handles = parseHandles(seeds)
-    if (handles.length === 0) {
+    const terms = parseKeywords(keywords)
+    if (mode === 'batch' && handles.length === 0) {
       setAlert('Paste at least one Instagram handle.')
+      return
+    }
+    if (mode === 'snowball' && handles.length === 0 && terms.length === 0) {
+      setAlert('Paste a seed handle or a keyword.')
       return
     }
     if (mode === 'batch') {
@@ -159,11 +176,19 @@ export function ResearchDock() {
       return
     }
     const picked = handles.slice(0, 20)
-    const job = createSnowball(picked, { reelsPerAccount: DEFAULT_SNOWBALL_REELS, delayMs: DEFAULT_DELAY_MS })
+    const job = createSnowball(picked, { reelsPerAccount: DEFAULT_SNOWBALL_REELS, delayMs: DEFAULT_DELAY_MS }, Date.now(), terms)
     await chrome.storage.local.set({ [SNOWBALL_KEY]: job, [SNOWBALL_PROGRESS_KEY]: progressLabel(job) })
-    if (picked.length < handles.length) setStatus('Using the first 20 handles.')
+    const trimmed: string[] = []
+    if (picked.length < handles.length) trimmed.push('the first 20 handles')
+    const typedKeywords = keywords.split(/[\n,;]+/).map((item) => item.trim()).filter(Boolean)
+    if (typedKeywords.length > terms.length) trimmed.push('the first 10 keywords')
+    if (trimmed.length > 0) setStatus(`Using ${trimmed.join(' and ')}.`)
+    if (terms.length > 0 || !picked[0]) {
+      void resumeSnowballRun()
+      return
+    }
     const surface = location.pathname.toLowerCase()
-    if (surface.includes(`/${picked[0]?.toLowerCase()}/reels`)) void resumeSnowballRun()
+    if (surface.includes(`/${picked[0].toLowerCase()}/reels`)) void resumeSnowballRun()
     else location.assign(reelsUrl(picked[0]))
   }
 
@@ -338,6 +363,11 @@ export function ResearchDock() {
           onSeeds={(value) => {
             setEdited(true)
             setSeeds(value)
+          }}
+          keywords={keywords}
+          onKeywords={(value) => {
+            setKeywordsEdited(true)
+            setKeywords(value)
           }}
           mode={mode}
           onMode={setMode}

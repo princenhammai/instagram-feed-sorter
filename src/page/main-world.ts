@@ -1,5 +1,5 @@
 import { extractFollowerCounts, extractItems, extractUserId, extractUsers } from '../lib/instagram/extract'
-import { accountSearchUrl } from '../lib/instagram/search'
+import { accountSearchUrl, hashtagUrl, reelsSearchUrl, topSerpUrl, userSearchUrl } from '../lib/instagram/search'
 import { isInstagramDataUrl, mergePost, parseBodies } from '../lib/instagram/capture'
 import { normalizeMedia } from '../lib/instagram/normalize'
 import { findUserIdInText, HttpError, httpFailureMessage } from '../lib/instagram/page-data'
@@ -221,6 +221,22 @@ function withMax(url: string, maxId?: string): string {
   return next.toString()
 }
 
+async function reelsSearch(query: string): Promise<unknown> {
+  try {
+    const raw = await igFetch(reelsSearchUrl(query))
+    if (extractItems(raw).length > 0 || extractUsers(raw).length > 0) return raw
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 429) throw error
+  }
+  return igFetch(topSerpUrl(query))
+}
+
+async function hashtagPage(query: string): Promise<unknown> {
+  const url = hashtagUrl(query)
+  if (!url) return { items: [] }
+  return igFetch(url)
+}
+
 async function search(query: string, maxId?: string): Promise<unknown> {
   const url = new URL('https://www.instagram.com/api/v1/fbsearch/web/top_serp/')
   url.searchParams.set('query', query)
@@ -300,6 +316,12 @@ async function run(call: MainCall): Promise<unknown> {
       )
     case 'similar':
       return similarTo(call.username || '')
+    case 'user-search':
+      return igFetch(userSearchUrl(call.query || ''))
+    case 'reels-search':
+      return reelsSearch(call.query || '')
+    case 'hashtag':
+      return hashtagPage(call.query || '')
     case 'captured':
       scanEmbedded()
       return Array.from(captured.values())

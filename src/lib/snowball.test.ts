@@ -3,14 +3,17 @@ import { samplePost } from './sample'
 import {
   applyCandidates,
   applyScore,
+  applySearchCandidates,
   createSnowball,
   markExpanded,
+  parseKeywords,
   pauseSnowball,
   plan,
   provenanceText,
   resumeSnowball,
   snowballAccountTable,
   type IncomingCandidate,
+  type SearchHit,
   type SnowballJob,
 } from './snowball'
 import type { Post } from './types'
@@ -45,11 +48,15 @@ interface Node {
   suggested?: IncomingCandidate[]
 }
 
-function walk(start: SnowballJob, graph: Record<string, Node>, now = DAY): SnowballJob {
+function walk(start: SnowballJob, graph: Record<string, Node>, now = DAY, searches: Record<string, SearchHit[]> = {}): SnowballJob {
   let job = start
   for (let guard = 0; guard < 40 && job.status === 'running'; guard += 1) {
     const planned = plan(job, now)
     job = planned.job
+    if (planned.step.type === 'search' && planned.step.keyword) {
+      job = applySearchCandidates(job, planned.step.keyword, searches[planned.step.keyword] ?? [], now)
+      continue
+    }
     if (planned.step.type === 'score' && planned.step.username) {
       const node = graph[planned.step.username]
       job = applyScore(
@@ -204,6 +211,69 @@ describe('snowball graph', () => {
     const resumed = plan(resumeSnowball(job, DAY + 1000), DAY + 1000)
     expect(resumed.step).toMatchObject({ type: 'score', username: 'ada', depth: 0 })
     expect(resumed.job.accounts).toEqual([])
+  })
+
+  it('adds keyword accounts at round 0, dedupes seeds, and expands a strong one', () => {
+    const searches: Record<string, SearchHit[]> = {
+      barber: [
+        { username: 'ada', followers: 80_000 },
+        { username: 'fade.room', followers: 5_000 },
+        { username: 'tiny', followers: 10 },
+      ],
+      fade: [
+        { username: 'fade.room', followers: 5_000 },
+        { username: 'other.shop', followers: 8_000 },
+      ],
+    }
+    const deduped = applySearchCandidates(
+      createSnowball(['ada'], {}, DAY, ['barber']),
+      'barber',
+      searches.barber ?? [],
+      DAY,
+    )
+    expect(deduped.queue.map((item) => item.username)).toEqual(['ada', 'fade.room', 'tiny'])
+    expect(deduped.queue[0]?.sources).toEqual([])
+    expect(provenanceText(deduped.queue[1]?.sources ?? [])).toBe('search: barber')
+
+    const started = createSnowball([], { maxDepth: 1, targetStrong: 10, minStrongRatio: 0, minFollowers: 1_000 }, DAY, ['barber', 'fade', 'barber'])
+    expect(started.phase).toBe('search')
+    expect(started.keywords).toEqual(['barber', 'fade'])
+    expect(plan(started, DAY).step).toEqual({ type: 'search', keyword: 'barber' })
+    const finished = walk(
+      started,
+      {
+        'fade.room': { followers: 5_000, posts: strongPosts('fade.room'), following: [{ username: 'gina', followers: 2_000, via: 'following' }] },
+        'other.shop': { followers: 8_000, posts: weakPosts('other.shop') },
+        gina: { followers: 2_000, posts: weakPosts('gina') },
+      },
+      DAY,
+      {
+        barber: [
+          { username: 'fade.room', followers: 5_000 },
+          { username: 'tiny', followers: 10 },
+        ],
+        fade: searches.fade ?? [],
+      },
+    )
+    expect(finished.accounts.map((account) => account.username)).toEqual(['fade.room', 'other.shop', 'gina'])
+    expect(finished.accounts.find((account) => account.username === 'fade.room')).toMatchObject({
+      provenance: 'search: barber; search: fade',
+      depth: 0,
+      grade: 'STRONG',
+    })
+    expect(finished.accounts.find((account) => account.username === 'gina')?.provenance).toBe('followed by fade.room')
+    expect(finished.accounts.some((account) => account.username === 'tiny' || account.username === 'ada')).toBe(false)
+  })
+
+  it('caps accounts added for one keyword and keeps a paused search resumable', () => {
+    const hits = Array.from({ length: 20 }, (_, index) => ({ username: `shop${index}`, followers: 100 }))
+    const capped = applySearchCandidates(createSnowball([], { searchCap: 3 }, DAY, ['barber']), 'barber', hits, DAY)
+    expect(capped.queue.map((item) => item.username)).toEqual(['shop0', 'shop1', 'shop2'])
+    expect(capped.searched).toEqual(['barber'])
+    const partial = applySearchCandidates(createSnowball([], {}, DAY, ['barber']), 'barber', hits.slice(0, 2), DAY, false)
+    expect(partial.searched).toEqual([])
+    expect(plan(partial, DAY).step).toEqual({ type: 'search', keyword: 'barber' })
+    expect(parseKeywords('barber\nNail art, barber; #fade')).toEqual(['barber', 'Nail art', '#fade'])
   })
 
   it('exports grade, unpaid breakouts, and provenance', () => {

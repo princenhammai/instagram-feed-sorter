@@ -4,6 +4,8 @@ import { TOP_DOWNLOAD, VISIBLE_CAP, type ResearchMode, type ResearchRow, type Re
 export function ResearchPanel({
   seeds,
   onSeeds,
+  keywords = '',
+  onKeywords = () => undefined,
   mode,
   onMode,
   running,
@@ -28,6 +30,8 @@ export function ResearchPanel({
 }: {
   seeds: string
   onSeeds: (value: string) => void
+  keywords?: string
+  onKeywords?: (value: string) => void
   mode: ResearchMode
   onMode: (mode: ResearchMode) => void
   running: boolean
@@ -64,12 +68,24 @@ export function ResearchPanel({
         Seed handles
         <textarea
           value={seeds}
-          rows={5}
+          rows={mode === 'snowball' ? 3 : 5}
           placeholder={'@ada\nhttps://www.instagram.com/bob/'}
           aria-label="Seed handles, one per line"
           onChange={(event) => onSeeds(event.target.value)}
         />
       </label>
+      {mode === 'snowball' && (
+        <label className="research-seeds">
+          Keywords
+          <textarea
+            value={keywords}
+            rows={3}
+            placeholder={'barber\nnail art'}
+            aria-label="Keywords, one per line"
+            onChange={(event) => onKeywords(event.target.value)}
+          />
+        </label>
+      )}
 
       <div className="segment" role="group" aria-label="Run mode">
         <button type="button" aria-pressed={mode === 'batch'} onClick={() => onMode('batch')}>
@@ -82,7 +98,7 @@ export function ResearchPanel({
       <p className="note">
         {mode === 'batch'
           ? 'Loads 100 Reels the same way a single-profile sort does, 1.2s apart. A rate limit waits and shows the HTTP status.'
-          : 'Scores 30 Reels, expands only STRONG accounts, and stops at 20 STRONG, depth 2, or a weak round.'}
+          : 'Scores 30 Reels. Keywords add up to 15 accounts each as search: keyword, then the same STRONG expansion.'}
       </p>
 
       <div className="row">

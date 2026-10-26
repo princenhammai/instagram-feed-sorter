@@ -1,7 +1,9 @@
-import { followerCount, followingPage, similarAccounts } from './api'
+import { followerCount, followingPage, searchHashtag, searchReels, searchUsers, similarAccounts } from './api'
 import { loadReelsPage } from './reels-load'
 import { notify, patch } from './store'
 import { isRateLimited, reelsUrl } from '../lib/batch'
+import { HttpError } from '../lib/instagram/page-data'
+import { hashtagUrl } from '../lib/instagram/search'
 import { collectPosts } from '../lib/instagram/collect'
 import { humanError } from '../lib/format'
 import { downloadName, safeSegment } from '../lib/media-files'
@@ -12,6 +14,7 @@ import {
   SNOWBALL_PROGRESS_KEY,
   applyCandidates,
   applyScore,
+  applySearchCandidates,
   isSnowballJob,
   markExpanded,
   pauseSnowball,
@@ -21,6 +24,7 @@ import {
   snowballAccountTable,
   snowballCsv,
   snowballQueueTable,
+  type SearchHit,
   type SnowballJob,
 } from '../lib/snowball'
 import { buildWorkbook } from '../lib/xlsx'
@@ -144,6 +148,45 @@ function pause(ms: number, signal: AbortSignal): Promise<boolean> {
   })
 }
 
+async function readKeyword(
+  keyword: string,
+  cap: number,
+  delayMs: number,
+  signal: AbortSignal,
+): Promise<{ hits: SearchHit[]; error?: string; limited: boolean; aborted: boolean }> {
+  const hits: SearchHit[] = []
+  const seen = new Set<string>()
+  const notes: string[] = []
+  const take = (accounts: { username: string; followers: number | null }[]) => {
+    for (const account of accounts) {
+      if (hits.length >= cap) return
+      const key = account.username.toLowerCase()
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      hits.push({ username: account.username, followers: account.followers })
+    }
+  }
+  const sources: Array<() => Promise<{ username: string; followers: number | null }[]>> = [
+    () => searchUsers(keyword),
+    () => searchReels(keyword),
+    ...(hashtagUrl(keyword) ? [() => searchHashtag(keyword)] : []),
+  ]
+  for (let index = 0; index < sources.length; index += 1) {
+    if (signal.aborted) return { hits, limited: false, aborted: true }
+    if (hits.length >= cap) break
+    if (index > 0 && !(await pause(delayMs, signal))) return { hits, limited: false, aborted: true }
+    try {
+      take(await sources[index]())
+    } catch (error) {
+      const message = humanError(error)
+      const status = error instanceof HttpError ? error.status : undefined
+      if (isRateLimited(message, status)) return { hits, error: message, limited: true, aborted: false }
+      if (message && !notes.includes(message)) notes.push(message)
+    }
+  }
+  return { hits, error: notes.join(' ') || undefined, limited: false, aborted: signal.aborted }
+}
+
 async function runOnce(): Promise<void> {
   const existing = await loadSnowball()
   if (!existing || existing.status !== 'running') return
@@ -161,6 +204,38 @@ async function runOnce(): Promise<void> {
   }
   const signal = signalHook?.()
   if (!signal) return
+
+  if (planned.step.type === 'search') {
+    const keyword = planned.step.keyword || ''
+    if (!keyword) return
+    patch({
+      phase: { type: 'collecting', collected: 0, label: `Searching “${keyword}”`, percent: null, scrolling: false },
+    })
+    if (!(await pause(planned.job.settings.delayMs, signal))) return
+    const latest = await loadSnowball()
+    if (!latest || latest.status !== 'running') return
+    const found = await readKeyword(keyword, latest.settings.searchCap ?? 15, latest.settings.delayMs, signal)
+    if (found.aborted || signal.aborted) {
+      await saveSnowball(pauseSnowball(latest, 'Paused.'))
+      patch({ phase: { type: 'idle' } })
+      return
+    }
+    if (found.limited) {
+      const partial = applySearchCandidates(latest, keyword, found.hits, Date.now(), false)
+      const message = found.error || 'Instagram is rate limiting this account.'
+      await saveSnowball(pauseSnowball(partial, message))
+      patch({ phase: { type: 'idle' } })
+      notify(`${message} Resume the snowball from the research panel when Instagram has calmed down.`)
+      return
+    }
+    const next = applySearchCandidates(latest, keyword, found.hits)
+    const missed = found.error && found.hits.length === 0 ? `No accounts for “${keyword}”. ${found.error}` : undefined
+    await saveSnowball({ ...next, searchNote: missed })
+    if (missed) notify(missed)
+    snowballAgain = true
+    return
+  }
+
   const username = planned.step.username
   if (!username) return
 
