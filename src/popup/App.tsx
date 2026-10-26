@@ -3,6 +3,21 @@ import { allowedSorts, countAllAllowed, dateFilterAllowed, defaultSort, isSortab
 import { rangeError } from '../lib/range'
 import { loadSettings, saveSettings } from '../lib/settings'
 import { BATCH_KEY, BATCH_PROGRESS_KEY, clampDelay, clampReels, createJob, isBatchJob, parseHandles, reelsUrl, DEFAULT_DELAY_MS, DEFAULT_REELS, type BatchJob, type BatchProgress } from '../lib/batch'
+import {
+  DEFAULT_DAILY_CAP,
+  DEFAULT_MAX_DEPTH,
+  DEFAULT_SNOWBALL_REELS,
+  DEFAULT_STRONG_BREAKOUTS,
+  DEFAULT_STRONG_MEDIAN,
+  DEFAULT_TARGET_STRONG,
+  SNOWBALL_KEY,
+  SNOWBALL_PROGRESS_KEY,
+  createSnowball,
+  isSnowballJob,
+  plan,
+  progressLabel,
+  type SnowballJob,
+} from '../lib/snowball'
 import { DEFAULT_SETTINGS, DEFAULT_TRANSCRIBE_ENDPOINT, type DatePreset, type RangeChoice, type Settings, type SortKey, type Surface } from '../lib/types'
 
 const SORTS: { key: SortKey; label: string; icon: string; hint?: string }[] = [
@@ -81,6 +96,21 @@ export function App() {
   const [batchDelay, setBatchDelay] = useState(String(DEFAULT_DELAY_MS))
   const [batchJob, setBatchJob] = useState<BatchJob | null>(null)
   const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null)
+  const [snowText, setSnowText] = useState('')
+  const [snowJob, setSnowJob] = useState<SnowballJob | null>(null)
+  const [snowProgress, setSnowProgress] = useState('')
+  const [snowReels, setSnowReels] = useState(String(DEFAULT_SNOWBALL_REELS))
+  const [snowDelay, setSnowDelay] = useState(String(DEFAULT_DELAY_MS))
+  const [snowDaily, setSnowDaily] = useState(String(DEFAULT_DAILY_CAP))
+  const [snowBreakouts, setSnowBreakouts] = useState(String(DEFAULT_STRONG_BREAKOUTS))
+  const [snowMedian, setSnowMedian] = useState(String(DEFAULT_STRONG_MEDIAN))
+  const [snowTarget, setSnowTarget] = useState(String(DEFAULT_TARGET_STRONG))
+  const [snowDepth, setSnowDepth] = useState(String(DEFAULT_MAX_DEPTH))
+  const [snowRatio, setSnowRatio] = useState('20')
+  const [snowFollowing, setSnowFollowing] = useState('40')
+  const [snowMinFollowers, setSnowMinFollowers] = useState('')
+  const [snowMaxFollowers, setSnowMaxFollowers] = useState('')
+  const [snowEngagement, setSnowEngagement] = useState('')
 
   useEffect(() => {
     void (async () => {
@@ -89,15 +119,19 @@ export function App() {
       setSettings(await loadSettings())
       const bridge = await chrome.runtime.sendMessage({ type: 'BRIDGE_STATUS' }).catch(() => null)
       setBridgeOn(Boolean(bridge?.connected))
-      const stored = await chrome.storage.local.get([BATCH_KEY, BATCH_PROGRESS_KEY])
+      const stored = await chrome.storage.local.get([BATCH_KEY, BATCH_PROGRESS_KEY, SNOWBALL_KEY, SNOWBALL_PROGRESS_KEY])
       setBatchJob(isBatchJob(stored[BATCH_KEY]) ? stored[BATCH_KEY] : null)
       setBatchProgress((stored[BATCH_PROGRESS_KEY] as BatchProgress | undefined) ?? null)
+      setSnowJob(isSnowballJob(stored[SNOWBALL_KEY]) ? stored[SNOWBALL_KEY] : null)
+      setSnowProgress(typeof stored[SNOWBALL_PROGRESS_KEY] === 'string' ? stored[SNOWBALL_PROGRESS_KEY] : '')
       setReady(true)
     })()
     const onChanged = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
       if (area !== 'local') return
       if (changes[BATCH_KEY]) setBatchJob(isBatchJob(changes[BATCH_KEY].newValue) ? changes[BATCH_KEY].newValue as BatchJob : null)
       if (changes[BATCH_PROGRESS_KEY]) setBatchProgress((changes[BATCH_PROGRESS_KEY].newValue as BatchProgress | undefined) ?? null)
+      if (changes[SNOWBALL_KEY]) setSnowJob(isSnowballJob(changes[SNOWBALL_KEY].newValue) ? changes[SNOWBALL_KEY].newValue as SnowballJob : null)
+      if (changes[SNOWBALL_PROGRESS_KEY]) setSnowProgress(typeof changes[SNOWBALL_PROGRESS_KEY].newValue === 'string' ? changes[SNOWBALL_PROGRESS_KEY].newValue : '')
     }
     chrome.storage.onChanged.addListener(onChanged)
     return () => chrome.storage.onChanged.removeListener(onChanged)
@@ -209,6 +243,85 @@ export function App() {
       return
     }
     await openBatch(reelsUrl(job.handles[job.index] || job.handles[0]))
+  }
+
+  async function openSnowball(url: string) {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (tab?.id && tab.url?.includes('instagram.com')) {
+      const same = tab.url.split('?')[0]?.replace(/\/+$/, '') === url.replace(/\/+$/, '')
+      if (same) await chrome.tabs.sendMessage(tab.id, { type: 'RESUME_SNOWBALL' }).catch(() => undefined)
+      else await chrome.tabs.update(tab.id, { url })
+    } else {
+      await chrome.tabs.create({ url })
+    }
+    window.close()
+  }
+
+  function snowSettings() {
+    const minFollowers = snowMinFollowers.trim() === '' ? null : Number(snowMinFollowers)
+    const maxFollowers = snowMaxFollowers.trim() === '' ? null : Number(snowMaxFollowers)
+    return {
+      reelsPerAccount: Number(snowReels),
+      delayMs: Number(snowDelay),
+      dailyCap: Number(snowDaily),
+      strongBreakouts: Number(snowBreakouts),
+      strongMedianViews: Number(snowMedian),
+      targetStrong: Number(snowTarget),
+      maxDepth: Number(snowDepth),
+      minStrongRatio: Number(snowRatio) / 100,
+      followingCap: Number(snowFollowing),
+      minFollowers,
+      maxFollowers,
+      minEngagement: snowEngagement.trim() === '' ? null : Number(snowEngagement) / 100,
+    }
+  }
+
+  async function runSnowball() {
+    setError('')
+    if (batchJob?.status === 'running') {
+      setError('Pause the batch before starting a snowball.')
+      return
+    }
+    const seeds = parseHandles(snowText).slice(0, 20)
+    if (seeds.length === 0) {
+      setError('Paste at least one Instagram handle to seed the snowball.')
+      return
+    }
+    const job = createSnowball(seeds, snowSettings())
+    await chrome.storage.local.set({ [SNOWBALL_KEY]: job, [SNOWBALL_PROGRESS_KEY]: progressLabel(job) })
+    await openSnowball(reelsUrl(seeds[0]))
+  }
+
+  async function resumeSnowballCrawl() {
+    setError('')
+    const stored = await chrome.storage.local.get(SNOWBALL_KEY)
+    const job = isSnowballJob(stored[SNOWBALL_KEY]) ? stored[SNOWBALL_KEY] : null
+    if (!job || job.status === 'done') {
+      setError('No paused snowball to resume.')
+      return
+    }
+    const planned = plan({ ...job, status: 'running' })
+    const next = planned.step.type === 'score' ? planned.step.username : undefined
+    if (next) {
+      await openSnowball(reelsUrl(next))
+      return
+    }
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (tab?.id && tab.url?.includes('instagram.com')) {
+      await chrome.tabs.sendMessage(tab.id, { type: 'RESUME_SNOWBALL' }).catch(() => undefined)
+      window.close()
+      return
+    }
+    await openSnowball('https://www.instagram.com/')
+  }
+
+  async function pauseSnowballCrawl() {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (tab?.id) await chrome.tabs.sendMessage(tab.id, { type: 'PAUSE_SNOWBALL' }).catch(() => undefined)
+    const stored = await chrome.storage.local.get(SNOWBALL_KEY)
+    if (isSnowballJob(stored[SNOWBALL_KEY]) && stored[SNOWBALL_KEY].status === 'running') {
+      await chrome.storage.local.set({ [SNOWBALL_KEY]: { ...stored[SNOWBALL_KEY], status: 'paused', note: 'Paused.', updatedAt: Date.now() } })
+    }
   }
 
   async function pauseBatchRun() {
@@ -368,6 +481,66 @@ export function App() {
               ? `${batchProgress.index}/${batchProgress.total} @${batchProgress.handle} · ${batchProgress.collected} reels`
               : `${batchJob.status} · ${batchJob.index}/${batchJob.handles.length}`}
             {batchJob.note ? ` · ${batchJob.note}` : ''}
+          </p>
+        )}
+      </section>
+
+      <section className="card">
+        <p className="label">Snowball research</p>
+        <textarea
+          className="field"
+          value={snowText}
+          placeholder={'Paste 10–20 seed handles\n@ada\nhttps://www.instagram.com/bob/'}
+          aria-label="Snowball seed handles, one per line"
+          onChange={(event) => setSnowText(event.target.value)}
+        />
+        <p className="muted small">Scores each account from its Reels, then expands only STRONG accounts through following and suggested lists. Read-only.</p>
+        <details className="fold">
+          <summary>Thresholds and caps</summary>
+          <div className="row">
+            <input className="field" type="number" min={1} max={100} value={snowReels} aria-label="Reels scored per account" onChange={(event) => setSnowReels(event.target.value)} />
+            <input className="field" type="number" min={400} max={10000} step={100} value={snowDelay} aria-label="Delay between requests in milliseconds" onChange={(event) => setSnowDelay(event.target.value)} />
+            <input className="field" type="number" min={1} max={200} value={snowDaily} aria-label="Accounts scored per UTC day" onChange={(event) => setSnowDaily(event.target.value)} />
+          </div>
+          <div className="row">
+            <input className="field" type="number" min={1} max={30} value={snowBreakouts} aria-label="Minimum unpaid reels at 3 times median for STRONG" onChange={(event) => setSnowBreakouts(event.target.value)} />
+            <input className="field" type="number" min={0} value={snowMedian} aria-label="Minimum median views for STRONG" onChange={(event) => setSnowMedian(event.target.value)} />
+            <input className="field" type="number" min={0} max={100} value={snowEngagement} placeholder="Min eng %" aria-label="Minimum engagement percent for STRONG" onChange={(event) => setSnowEngagement(event.target.value)} />
+          </div>
+          <div className="row">
+            <input className="field" type="number" min={1} max={200} value={snowTarget} aria-label="Target count of STRONG accounts" onChange={(event) => setSnowTarget(event.target.value)} />
+            <input className="field" type="number" min={0} max={6} value={snowDepth} aria-label="Maximum crawl depth" onChange={(event) => setSnowDepth(event.target.value)} />
+            <input className="field" type="number" min={0} max={100} value={snowRatio} aria-label="Minimum percent STRONG before the next ring" onChange={(event) => setSnowRatio(event.target.value)} />
+          </div>
+          <div className="row">
+            <input className="field" type="number" min={0} max={80} value={snowFollowing} aria-label="Following accounts kept per STRONG profile" onChange={(event) => setSnowFollowing(event.target.value)} />
+            <input className="field" type="number" min={0} value={snowMinFollowers} placeholder="Min followers" aria-label="Minimum follower count" onChange={(event) => setSnowMinFollowers(event.target.value)} />
+            <input className="field" type="number" min={0} value={snowMaxFollowers} placeholder="Max followers" aria-label="Maximum follower count" onChange={(event) => setSnowMaxFollowers(event.target.value)} />
+          </div>
+          <p className="muted small">Reels, delay (ms), daily cap. Then unpaid 3× reels, median views, and an optional engagement percent for STRONG. Then target, max depth, and the minimum STRONG percent that lets the next ring start. Following cap and optional follower range filter the queue.</p>
+        </details>
+        <div className="row">
+          {snowJob?.status !== 'running' && (
+            <button type="button" className="primary" disabled={busy != null} onClick={() => void runSnowball()}>
+              Run snowball
+            </button>
+          )}
+          {snowJob?.status === 'paused' && (
+            <button type="button" disabled={busy != null} onClick={() => void resumeSnowballCrawl()}>
+              Resume
+            </button>
+          )}
+          {snowJob?.status === 'running' && (
+            <button type="button" onClick={() => void pauseSnowballCrawl()}>
+              Pause
+            </button>
+          )}
+        </div>
+        {snowJob && (
+          <p className="muted small">
+            {snowJob.status}
+            {snowProgress ? ` · ${snowProgress}` : ` · ${progressLabel(snowJob)}`}
+            {snowJob.note ? ` · ${snowJob.note}` : ''}
           </p>
         )}
       </section>

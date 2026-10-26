@@ -1,5 +1,6 @@
 import { enrichPost, hasPlayableVideo, loadPage, mediaByShortcode, resetReelsSource, similarAccounts, storyPosts } from './api'
 import { batchIsActive, consumeBatchLeave, loadJob, markPaused, markResumed, onBatchResume, resumeBatch } from './batch-run'
+import { consumeSnowballLeave, loadSnowball, markSnowballPaused, markSnowballResumed, onSnowballResume, resumeSnowballRun, snowballIsActive } from './snowball-run'
 import { reelsUrl } from '../lib/batch'
 import { callMain } from './bridge'
 import { downloadToFolder, pickFolder } from './downloads'
@@ -74,20 +75,27 @@ export function init(): void {
   window.setInterval(() => {
     if (location.href !== getSnap().href) onNavigate()
   }, 800)
-  onBatchResume(
-    () => {
-      void resumeBatch()
-    },
-    () => {
-      collectAbort?.abort()
-      const controller = new AbortController()
-      collectAbort = controller
-      return controller.signal
-    },
-  )
-  void loadJob().then((job) => {
-    if (job?.status === 'running') void resumeBatch()
-    else resumePendingSort()
+  const signalForRun = () => {
+    collectAbort?.abort()
+    const controller = new AbortController()
+    collectAbort = controller
+    return controller.signal
+  }
+  onBatchResume(() => {
+    void resumeBatch()
+  }, signalForRun)
+  onSnowballResume(() => {
+    void resumeSnowballRun()
+  }, signalForRun)
+  void loadSnowball().then((snowball) => {
+    if (snowball?.status === 'running') {
+      void resumeSnowballRun()
+      return
+    }
+    void loadJob().then((job) => {
+      if (job?.status === 'running') void resumeBatch()
+      else resumePendingSort()
+    })
   })
 }
 
@@ -95,18 +103,36 @@ export function onNavigate(): void {
   const href = location.href
   if (href === getSnap().href) return
   const wasOpen = getSnap().phase.type !== 'idle'
+  const snowballLeaving = consumeSnowballLeave()
+  const snowballing = snowballLeaving || snowballIsActive()
   const leaving = consumeBatchLeave()
   const batching = leaving || batchIsActive()
-  if (!leaving) invalidate()
-  patch({ href, phase: leaving ? getSnap().phase : { type: 'idle' }, similar: CLOSED_SIMILAR, batch: batching ? getSnap().batch : null })
-  if (wasOpen && !batching) notify('Closed the sorted grid because this tab opened another Instagram page.')
+  if (!leaving && !snowballLeaving) invalidate()
+  patch({ href, phase: leaving || snowballLeaving ? getSnap().phase : { type: 'idle' }, similar: CLOSED_SIMILAR, batch: batching ? getSnap().batch : null })
+  if (wasOpen && !batching && !snowballing) notify('Closed the sorted grid because this tab opened another Instagram page.')
+  if (snowballLeaving) {
+    window.setTimeout(() => {
+      void resumeSnowballRun()
+    }, 0)
+    return
+  }
   if (leaving) {
     window.setTimeout(() => {
       void resumeBatch()
     }, 0)
     return
   }
-  if (batching) void resumeBatch()
+  if (snowballing) {
+    void resumeSnowballRun()
+    return
+  }
+  if (batching) {
+    void resumeBatch()
+    return
+  }
+  void loadSnowball().then((job) => {
+    if (job?.status === 'running') void resumeSnowballRun()
+  })
 }
 
 export function closeOverlay(): void {
@@ -1044,6 +1070,25 @@ export function onMessage(
     void similarAccounts(username)
       .then((accounts) => sendResponse({ ok: true, accounts }))
       .catch((error: unknown) => sendResponse({ ok: false, error: humanError(error) }))
+    return true
+  }
+  if (message?.type === 'PAUSE_SNOWBALL') {
+    void markSnowballPaused('Paused.').then(() => {
+      collectAbort?.abort()
+      patch({ phase: { type: 'idle' } })
+      sendResponse({ ok: true })
+    })
+    return true
+  }
+  if (message?.type === 'RESUME_SNOWBALL') {
+    void markSnowballResumed().then((job) => {
+      if (!job || job.status === 'done') {
+        sendResponse({ ok: false, error: job ? 'That snowball already finished.' : 'No snowball to resume.' })
+        return
+      }
+      sendResponse({ ok: true })
+      void resumeSnowballRun()
+    })
     return true
   }
   if (message?.type === 'PAUSE_BATCH') {

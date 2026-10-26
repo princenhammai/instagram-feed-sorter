@@ -23,6 +23,8 @@ export interface SummarySyncRow {
   topViews: number | null
   atLeast3x: number
   followers: number | null
+  note?: string
+  grade?: string
 }
 
 export interface NotionProperty {
@@ -99,6 +101,16 @@ export function notionProperties(schema: NotionProperty[], row: SummarySyncRow):
     }
     if ((property.type === 'url' || property.type === 'rich_text') && matchName(name, /top reel|permalink|url/)) {
       const encoded = textProperty(row.topReel, property.type)
+      if (encoded) properties[name] = encoded
+      continue
+    }
+    if (property.type === 'rich_text' && matchName(name, /source|provenance/)) {
+      const encoded = textProperty(row.note || '', 'rich_text')
+      if (encoded) properties[name] = encoded
+      continue
+    }
+    if (property.type === 'rich_text' && matchName(name, /^grade$/)) {
+      const encoded = textProperty(row.grade || '', 'rich_text')
       if (encoded) properties[name] = encoded
     }
   }
