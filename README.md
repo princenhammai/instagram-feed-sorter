@@ -33,17 +33,17 @@ Each tool uses the Instagram session already in this browser. None of them like,
 5. The results table sorts by × median (the default), engagement, or views. Paid reels are hidden until you check **Show paid**.
 6. **Export** saves an Excel file of the rows you are looking at. **Download top 10** saves those videos. **Sync** sends them to Google Sheets or Notion when that option is already on.
 
-Batch loads 100 Reels per account, 1.2 seconds apart. Snowball scores 30 Reels, expands only STRONG accounts, and stops at 20 STRONG accounts, depth 2, or a round under 20% STRONG. Those snowball thresholds are fixed for this pass.
+Batch loads 100 Reels per account, 1.2 seconds apart, using the same Reels request as a single-profile sort. It does not ask for the follower count before the first Reel page. If Instagram returns HTTP 429, the panel waits 15 seconds, then 30, then 60, and shows the status plus Instagram's message. Snowball scores 30 Reels, expands only STRONG accounts, and stops at 20 STRONG accounts, depth 2, or a round under 20% STRONG. Those snowball thresholds are fixed for this pass.
 
-The separate Find accounts dock and the popup's threshold form are deferred. Snowball already expands from STRONG accounts, and the fixed defaults above are the research settings.
+Handles are typed in the on-page panel. The popup only opens that panel and can resume a paused run, so a popup reload cannot drop the first character into the Reel count.
 
 ### Account finder
 
 1. Open a profile while signed in.
-2. In the Sorter overlay, choose **Find accounts**.
-3. Set how far to walk suggestions and how many following accounts to read. The same delay applies between requests.
-4. Choose **Collect**. New handles are stored on this browser and labeled with a source such as `suggested from ada`.
-5. Export the rows, or send them into the batch runner.
+2. Choose **Find accounts** on the right side of the page. The search starts immediately and the panel stays open.
+3. Suggested accounts and the following list appear in that panel. An empty result and any Instagram error, including the HTTP status, stay on the panel.
+4. Set how far to walk suggestions and how many following accounts to read, then choose **Collect** to run again. The same delay applies between requests.
+5. Export the new rows, or send them into the batch runner.
 
 ### Sheets and Notion
 
@@ -90,7 +90,7 @@ The extension is portable across desktop operating systems. GitHub hosting does 
 
 The short version is under Quickstart. The research panel's Batch mode uses 100 Reels per account and a 1200 ms delay. The same runner still accepts up to 200 Reels when a job is created with that count.
 
-The tab visits each profile's Reels page, reads up to N Reels, and scores that account on its own median. The export is one CSV of every Reel, one Excel workbook, and an HTML summary chart. The workbook has a Reels sheet, a New reels sheet, and a Summary sheet (reels loaded, median views, top Reel, how many Reels are at 3× the account median, and how many were already seen). Each Reel row includes the caption hook: the first line that still says something after hashtags and @mentions are removed. Pause keeps the finished accounts. Resume continues at the same handle. A rate limit, including Instagram's "please wait a few minutes" response, pauses the job instead of advancing. Shortcodes already exported on this browser are marked Seen before and left off the New reels sheet, so a later run does not treat them as new discoveries. The HTML file charts median views and 3× Reels per account.
+The tab visits each profile's Reels page and reads Reels with the same loader a single-profile sort uses. It waits until the open page has that account's id, and it does not call the profile endpoint before the first Reel page. The export is one CSV of every Reel, one Excel workbook, and an HTML summary chart. The workbook has a Reels sheet, a New reels sheet, and a Summary sheet (reels loaded, median views, top Reel, how many Reels are at 3× the account median, and how many were already seen). Each Reel row includes the caption hook: the first line that still says something after hashtags and @mentions are removed. Pause keeps the finished accounts. Resume continues at the same handle. A real HTTP 429 is retried after 15 seconds, 30 seconds, and 60 seconds. The panel shows `HTTP 429 from Instagram` plus the response text, such as "Please wait a few minutes". A long payload that merely contains the digits 429 does not pause the job. If the retries are exhausted, the job pauses on that same account instead of advancing. Shortcodes already exported on this browser are marked Seen before and left off the New reels sheet, so a later run does not treat them as new discoveries. The HTML file charts median views and 3× Reels per account.
 
 ## Snowball research
 
@@ -110,7 +110,7 @@ The export is a CSV and an Excel workbook with an Accounts sheet and a Queue she
 
 ## Account finder
 
-Deferred from the on-page UI. Snowball expansion covers the same read. The finder functions are still in the extension, but the Research panel is the path to use. On a profile, the old **Find accounts** dock is no longer shown. It reads Suggested for you, optionally walks a short chain of those suggestions, scrolls an open following dialog, and pages the following list up to the cap you set. The same delay applies between requests. New handles are stored on this browser, deduped, and labeled with a source such as `suggested from ada`. Export the new rows, or send them straight into the batch runner. This does not follow, like, or message anyone.
+On a profile or Reels tab, **Find accounts** sits on the right. Choosing it opens the panel and starts a read of suggested accounts and the following list. Candidates stay listed in the panel. If Instagram returns nothing, or a request fails, that outcome stays in the panel with the HTTP status and response text. A failure on the following list does not discard suggestions that already came back. New handles are stored on this browser, deduped, and labeled with a source such as `suggested from ada`. Export the new rows, or send them straight into the batch runner. This does not follow, like, or message anyone. The snowball threshold form stays off the panel; snowball uses the fixed defaults above.
 
 ## Sheets and Notion
 

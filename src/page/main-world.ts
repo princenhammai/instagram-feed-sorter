@@ -2,7 +2,7 @@ import { extractFollowerCounts, extractItems, extractUserId, extractUsers } from
 import { accountSearchUrl } from '../lib/instagram/search'
 import { isInstagramDataUrl, mergePost, parseBodies } from '../lib/instagram/capture'
 import { normalizeMedia } from '../lib/instagram/normalize'
-import { findUserIdInText, HttpError } from '../lib/instagram/page-data'
+import { findUserIdInText, HttpError, httpFailureMessage } from '../lib/instagram/page-data'
 import type { Post, SimilarAccount } from '../lib/types'
 import { ISO_SOURCE, MAIN_SOURCE, type MainCall } from '../lib/protocol'
 
@@ -64,17 +64,18 @@ async function igFetch(url: string, init: RequestInit = {}, retries = RETRY_DELA
       headers: { ...headers(), ...(init.headers as Record<string, string> | undefined) },
     })
     if (response.status === 429 && attempt < retries) {
+      await response.body?.cancel().catch(() => undefined)
       await wait(retryAfterMs(response) ?? RETRY_DELAYS[attempt])
       continue
     }
-    if (response.status === 401 || response.status === 403) {
-      throw new HttpError('Instagram refused the request. Refresh the page and make sure you are signed in.', response.status)
-    }
-    if (response.status === 429) {
-      throw new HttpError('Instagram is rate limiting this account. Wait a few minutes, then sort a smaller batch.', 429)
-    }
     const text = await response.text()
-    if (!response.ok) throw new HttpError(`Instagram returned ${response.status} for this page.`, response.status)
+    if (response.status === 401 || response.status === 403) {
+      throw new HttpError(
+        `${httpFailureMessage(response.status, text)} Refresh the page and make sure you are signed in.`,
+        response.status,
+      )
+    }
+    if (!response.ok) throw new HttpError(httpFailureMessage(response.status, text), response.status)
     try {
       return JSON.parse(text) as unknown
     } catch {
@@ -94,14 +95,35 @@ function userIdFromPage(username: string): string | undefined {
   return undefined
 }
 
+function cachedUserId(username: string): string | undefined {
+  return userIds.get(username.toLowerCase()) || userIdFromPage(username)
+}
+
 async function profile(username: string): Promise<unknown> {
-  const fromPage = userIdFromPage(username)
-  if (fromPage) return { data: { user: { id: fromPage } } }
+  const known = cachedUserId(username)
+  if (known) {
+    userIds.set(username.toLowerCase(), known)
+    return { data: { user: { id: known } } }
+  }
+  if (viewingProfile(username)) {
+    const deadline = Date.now() + 6000
+    while (Date.now() < deadline) {
+      await wait(250)
+      const id = cachedUserId(username)
+      if (id) {
+        userIds.set(username.toLowerCase(), id)
+        return { data: { user: { id } } }
+      }
+    }
+  }
   try {
-    return await igFetch(
+    const raw = await igFetch(
       `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
     )
+    ingest(raw)
+    return raw
   } catch (error) {
+    if (error instanceof HttpError && error.status === 429) throw error
     const search = (await igFetch(accountSearchUrl(username)).catch(() => null)) as {
       users?: { user?: { username?: string; pk?: unknown; pk_id?: unknown } }[]
     } | null
@@ -154,26 +176,41 @@ async function similarTo(username: string): Promise<SimilarAccount[]> {
     if (embedded.length > 0) return embedded
   }
 
-  let id = userIdFromPage(username)
-  const profile = await fetchOnce(
+  let id = cachedUserId(username)
+  let lastError: unknown
+  const profilePayload = await fetchOnce(
     `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
-  ).catch(() => null)
-  if (profile) {
-    const found = exceptTarget(username, extractUsers(profile))
+  ).catch((error: unknown) => {
+    lastError = error
+    return null
+  })
+  if (profilePayload) {
+    ingest(profilePayload)
+    const found = exceptTarget(username, extractUsers(profilePayload))
     if (found.length > 0) return found
-    id = id || extractUserId(profile)
+    id = id || extractUserId(profilePayload)
   }
-  if (!id) return []
+  if (!id) {
+    if (lastError) throw lastError
+    return []
+  }
 
   const urls = [
     `https://www.instagram.com/api/v1/discover/chaining/?target_id=${encodeURIComponent(id)}&module=profile`,
     `https://www.instagram.com/api/v1/discover/chaining/?target_id=${encodeURIComponent(id)}`,
   ]
+  let sawResponse = false
   for (const url of urls) {
-    const raw = await fetchOnce(url).catch(() => null)
-    const found = raw ? exceptTarget(username, extractUsers(raw)) : []
+    const raw = await fetchOnce(url).catch((error: unknown) => {
+      lastError = error
+      return null
+    })
+    if (!raw) continue
+    sawResponse = true
+    const found = exceptTarget(username, extractUsers(raw))
     if (found.length > 0) return found
   }
+  if (!sawResponse && lastError) throw lastError
   return []
 }
 
@@ -297,7 +334,28 @@ function hookHistory(): void {
 
 const captured = new Map<string, Post>()
 const followerCounts = new Map<string, number>()
+const userIds = new Map<string, string>()
 const scannedScripts = new WeakSet<Element>()
+
+function rememberIds(raw: unknown): void {
+  const walk = (node: unknown, depth: number) => {
+    if (!node || typeof node !== 'object' || depth > 12) return
+    if (Array.isArray(node)) {
+      if (depth > 6 && node.length > 40) return
+      for (const item of node) walk(item, depth + 1)
+      return
+    }
+    const record = node as Record<string, unknown>
+    if (typeof record.username === 'string' && record.username) {
+      const id = record.pk_id ?? record.pk ?? record.id
+      if ((typeof id === 'string' || typeof id === 'number') && /^\d{3,20}$/.test(String(id))) {
+        userIds.set(record.username.toLowerCase(), String(id))
+      }
+    }
+    for (const value of Object.values(record)) walk(value, depth + 1)
+  }
+  walk(raw, 0)
+}
 
 function ingest(raw: unknown): void {
   for (const item of extractItems(raw, 80)) {
@@ -305,6 +363,7 @@ function ingest(raw: unknown): void {
     if (post) captured.set(post.id, mergePost(captured.get(post.id), post))
   }
   for (const [username, count] of extractFollowerCounts(raw)) followerCounts.set(username, count)
+  rememberIds(raw)
 }
 
 async function followingPage(username: string, maxId?: string): Promise<unknown> {
@@ -406,6 +465,11 @@ if (!pageWindow.__ifsMainInstalled) {
   if (!data || data.source !== ISO_SOURCE || !nonceMatches(data.nonce) || !data.id) return
   run(data)
     .then((payload) => {
+      try {
+        ingest(payload)
+      } catch {
+        // A non-post payload still goes back to the content script.
+      }
       window.postMessage({ source: MAIN_SOURCE, nonce: data.nonce, id: data.id, payload }, window.location.origin)
     })
     .catch((error: unknown) => {

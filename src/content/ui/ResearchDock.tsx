@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ResearchPanel } from './ResearchPanel'
 import { kickBatch, loadJob, markPaused, markResumed, queueBatch, resumeBatch } from '../batch-run'
 import { downloadRanked, stopCollect } from '../controller'
@@ -70,6 +70,7 @@ export function ResearchDock() {
   const [alert, setAlert] = useState('')
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState<'' | 'export' | 'download' | 'sync'>('')
+  const hydrated = useRef<{ batch: boolean; snowball: boolean }>({ batch: false, snowball: false })
 
   useEffect(() => {
     const load = async () => {
@@ -103,9 +104,11 @@ export function ResearchDock() {
   }, [snap.researchOpen])
 
   useEffect(() => {
-    if (edited) return
+    if (edited || hydrated.current[mode]) return
     const next = mode === 'batch' ? batchJob?.handles.join('\n') : snowJob?.seeds?.join('\n')
-    if (next) setSeeds(next)
+    if (!next) return
+    hydrated.current[mode] = true
+    setSeeds(next)
   }, [mode, batchJob, snowJob, edited])
 
   const activeJob = mode === 'batch' ? batchJob : snowJob

@@ -81,7 +81,7 @@ export function ResearchPanel({
       </div>
       <p className="note">
         {mode === 'batch'
-          ? 'Loads 100 Reels per account, 1.2s apart. Read-only.'
+          ? 'Loads 100 Reels the same way a single-profile sort does, 1.2s apart. A rate limit waits and shows the HTTP status.'
           : 'Scores 30 Reels, expands only STRONG accounts, and stops at 20 STRONG, depth 2, or a weak round.'}
       </p>
 

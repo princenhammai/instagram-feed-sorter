@@ -1,4 +1,5 @@
-import { followerCount, loadPage } from './api'
+import { followerCount } from './api'
+import { loadReelsPage } from './reels-load'
 import { getSnap, notify, patch, type BatchProgress } from './store'
 import {
   BATCH_KEY,
@@ -13,7 +14,6 @@ import {
   createJob,
   currentHandle,
   isBatchJob,
-  isRateLimited,
   mergeSeen,
   pauseJob,
   progressLabel,
@@ -208,39 +208,38 @@ async function runOnce(): Promise<void> {
   if (!latest || latest.status !== 'running') return
 
   const known = seenKeySet(await loadSeen())
-  let followers: number | null = null
-  try {
-    followers = await followerCount(handle)
-  } catch (error) {
-    const message = humanError(error)
-    if (isRateLimited(message)) {
-      await settle(applyAccountOutcome(latest, handle, { followers: null, posts: [], thrown: message }, known))
-      return
-    }
-    followers = null
-  }
   if (signal.aborted) return
 
+  let collectedNow = 0
+  const showCollecting = (collected: number, label = `${latest.index + 1}/${latest.handles.length} · @${handle}`) => {
+    collectedNow = collected
+    const progress = progressLabel(latest, collected)
+    patch({
+      phase: {
+        type: 'collecting',
+        collected,
+        label,
+        percent: latest.reelsPerAccount > 0 ? Math.min(100, (collected / latest.reelsPerAccount) * 100) : null,
+        scrolling: false,
+      },
+      batch: progress,
+    })
+  }
+
+  let followers: number | null = null
   try {
     const result = await collectPosts({
       limit: latest.reelsPerAccount,
       delayMs: latest.delayMs,
       signal,
-      onProgress: (collected) => {
-        const progress = progressLabel(latest, collected)
-        patch({
-          phase: {
-            type: 'collecting',
-            collected,
-            label: `${latest.index + 1}/${latest.handles.length} · @${handle}`,
-            percent: Math.min(100, (collected / latest.reelsPerAccount) * 100),
-            scrolling: false,
-          },
-          batch: progress,
-        })
-      },
-      load: (maxId) => loadPage({ kind: 'reels', username: handle }, maxId),
+      onProgress: (collected) => showCollecting(collected),
+      load: (maxId) => loadReelsPage(handle, maxId, signal, (message) => showCollecting(collectedNow, message)),
     })
+    try {
+      followers = await followerCount(handle)
+    } catch {
+      followers = null
+    }
     const fresh = await loadJob()
     await settle(
       applyAccountOutcome(
@@ -272,8 +271,8 @@ async function settle(decision: AccountDecision): Promise<void> {
     const calm = decision.message !== 'Paused.'
     notify(
       calm
-        ? `${decision.message} Resume the batch from the popup when Instagram has calmed down.`
-        : 'Batch paused. Resume it from the extension popup.',
+        ? `${decision.message} Resume the batch from the research panel when Instagram has calmed down.`
+        : 'Batch paused. Resume it from the research panel.',
     )
     return
   }

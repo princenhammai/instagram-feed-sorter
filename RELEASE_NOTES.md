@@ -14,17 +14,17 @@ Download **instagram-feed-sorter-breakdown-v0.4.1.zip**. It contains `breakdown.
 
 ## Quickstart
 
-- **Research panel.** On an Instagram tab, choose Research. Paste handles, run Batch or Snowball, and read progress in the same panel. The results table sorts by × median, engagement, or views, and hides paid reels until you show them. Export, Download top 10, and Sync are one click. Resume stays on the panel.
-- **Batch runner.** Popup → paste handles → set the Reel count and delay → Run batch. Pause and Resume stay in the popup. The download is one CSV, one Excel workbook, and an HTML chart.
-- **Account finder.** On a profile, Find accounts. Export the new handles or send them into the batch.
+- **Research panel.** On an Instagram tab, choose Research. Paste handles, run Batch or Snowball, and read progress in the same panel. The results table sorts by × median, engagement, or views, and hides paid reels until you show them. Export, Download top 10, and Sync are one click. Resume stays on the panel. The popup only opens this panel, so reloading the popup cannot move typed handles into the Reel count.
+- **Batch runner.** Paste handles in the research panel and choose Run. Each account uses the same Reels request as a single-profile sort. A real HTTP 429 waits 15s, 30s, then 60s and shows the status and Instagram's message before pausing on that account. The download is one CSV, one Excel workbook, and an HTML chart.
+- **Account finder.** On a profile, Find accounts on the right. Suggestions and errors stay in that panel. Export the new handles or send them into the batch.
 - **Sheets and Notion.** Options page. Both stay off until you enable them. Notion uses a token stored only in this browser.
 - **Video breakdown.** Download top N, then `python3 breakdown.py "rank01_ada_AbC.mp4" --out breakdowns --whisper-model tiny`.
 
 ## Included
 
 - Snowball research chains the batch scorer and the account finder. Seeds are scored from a configurable number of Reels. STRONG requires a configurable count of unpaid Reels at 3× the account median and a minimum median view count. Expansion reads a capped following list plus suggestions, skips anything already seen, and ranks the queue by how many distinct STRONG accounts mention it. The crawl stops at a STRONG target, a max depth, or a round under the STRONG ratio, and it pauses at a daily cap. State (seen, queue, scores, sources, depth) survives a reload. CSV and Excel include provenance. Sheets and Notion stay optional.
-- Paste handles and the open Instagram tab visits each Reels page, loads up to 200 Reels, and waits a configurable delay between requests. One CSV, one Excel file, and an HTML chart include an account column, per-account median, × median, engagement, the paid-post flag, and the caption hook. The workbook adds a summary sheet and a sheet of Reels not seen on an earlier run. A rate limit pauses on the same account. Pause and resume keep finished accounts.
-- Find accounts on a profile from suggestions and the following list, skip handles already saved, and export them or start a batch.
+- Paste handles and the open Instagram tab visits each Reels page, loads up to 200 Reels with the same request a single-profile sort uses, and waits a configurable delay between requests. It does not request the follower count before that first Reel page. One CSV, one Excel file, and an HTML chart include an account column, per-account median, × median, engagement, the paid-post flag, and the caption hook. The workbook adds a summary sheet and a sheet of Reels not seen on an earlier run. HTTP 429 is retried after 15, 30, and 60 seconds, and the panel shows the status and response. If those retries run out, the job pauses on the same account. Pause and resume keep finished accounts.
+- Find accounts on a profile from suggestions and the following list. The panel lists new handles and keeps the error, including the HTTP status, when a request fails. Export them or start a batch.
 - Google Sheets and Notion sync are off until you enable them in options. Notion uses a token stored only in this browser.
 - Download top N names files `rankNN_<handle>_<shortcode>.mp4`. The breakdown zip makes a local contact sheet, scene cuts, an offline transcript, and OCR of on-screen text.
 - v0.3.3, below, is included: exports wait until Chrome finishes the file.

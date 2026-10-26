@@ -480,7 +480,7 @@ input:focus, select:focus { outline: 1px solid var(--accent); border-color: tran
 .research-panel .check { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; }
 .research-actions { position: sticky; bottom: 0; display: flex; gap: 8px; padding-top: 8px; background: var(--panel); }
 .research-actions button { flex: 1; }
-.finder { pointer-events: auto; position: fixed; z-index: 10; left: 16px; top: 72px; }
+.finder { pointer-events: auto; position: fixed; z-index: 11; right: 16px; top: 72px; display: flex; flex-direction: column; align-items: flex-end; }
 .finder-panel {
   width: min(360px, calc(100vw - 32px));
   margin-bottom: 8px;
@@ -497,6 +497,7 @@ input:focus, select:focus { outline: 1px solid var(--accent); border-color: tran
 .finder-panel input { width: 6.5rem; }
 .finder-panel ul { margin: 0; padding-left: 18px; max-height: 160px; overflow: auto; }
 .finder-panel li span { color: var(--muted); }
+.finder-error { margin: 0; padding: 8px 10px; border-radius: 8px; background: rgba(240, 122, 110, 0.14); color: var(--danger); font-size: 13px; }
 .hover-tools { position: fixed; z-index: 10; display: flex; gap: 6px; pointer-events: auto; }
 .hover-tools button { background: rgba(0, 0, 0, 0.75); border-color: transparent; padding: 4px 9px; font-size: 12px; }
 

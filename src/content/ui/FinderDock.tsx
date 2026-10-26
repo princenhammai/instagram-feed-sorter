@@ -1,7 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { collectCandidates, exportCandidates, loadCandidates, sendCandidatesToBatch, DEFAULT_FOLLOWING } from '../finder'
 import { DEFAULT_DELAY_MS, DEFAULT_REELS } from '../../lib/batch'
-import { notify } from '../store'
 import type { Candidate } from '../../lib/candidates'
 
 export function FinderDock({ username }: { username: string }) {
@@ -13,9 +12,28 @@ export function FinderDock({ username }: { username: string }) {
   const [added, setAdded] = useState<Candidate[]>([])
   const [known, setKnown] = useState(0)
   const [label, setLabel] = useState('')
+  const [error, setError] = useState('')
+  const [report, setReport] = useState('')
+
+  useEffect(() => {
+    let live = true
+    setAdded([])
+    setError('')
+    setReport('')
+    void loadCandidates().then((all) => {
+      if (!live) return
+      setKnown(all.length)
+    })
+    return () => {
+      live = false
+    }
+  }, [username])
 
   async function run() {
     setBusy(true)
+    setOpen(true)
+    setError('')
+    setReport('')
     setLabel('Starting…')
     const controller = new AbortController()
     try {
@@ -23,26 +41,40 @@ export function FinderDock({ username }: { username: string }) {
         username,
         chain,
         followingCap,
-        scrollRounds: 4,
+        scrollRounds: 0,
         delayMs,
         signal: controller.signal,
         onProgress: setLabel,
       })
       setAdded(result.added)
       setKnown(result.all.length)
-      notify(result.added.length === 0 ? 'No new accounts. The saved list already had these.' : `Added ${result.added.length} accounts.`)
-    } catch (error) {
-      notify(error instanceof Error ? error.message : 'Could not read accounts.')
+      setError(result.error || '')
+      if (result.added.length > 0) {
+        setReport(`${result.added.length} new · ${result.all.length} saved on this browser`)
+      } else if (!result.error) {
+        setReport(`No suggested or following accounts came back for @${username}.`)
+      } else if (result.all.length > 0) {
+        setReport(`${result.all.length} saved earlier. This pass did not add any.`)
+      } else {
+        setReport('')
+      }
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : 'Could not read accounts.'
+      if (caught instanceof DOMException && caught.name === 'AbortError') return
+      setError(message)
+      setReport('')
     } finally {
       setBusy(false)
       setLabel('')
     }
   }
 
+  const listed = added
+
   return (
     <div className="finder">
-      <button type="button" className="primary" onClick={() => setOpen((value) => !value)}>
-        Find accounts
+      <button type="button" className="primary" onClick={() => (open ? setOpen(false) : void run())}>
+        {busy ? 'Finding accounts…' : 'Find accounts'}
       </button>
       {open && (
         <div className="finder-panel">
@@ -63,32 +95,45 @@ export function FinderDock({ username }: { username: string }) {
           <button type="button" className="primary" disabled={busy} onClick={() => void run()}>
             {busy ? label || 'Reading…' : 'Collect'}
           </button>
-          {added.length > 0 && (
+          {busy && label && (
+            <p className="note" role="status">
+              {label}
+            </p>
+          )}
+          {error && (
+            <p className="finder-error" role="alert">
+              {error}
+            </p>
+          )}
+          {report && <p className="note">{report}</p>}
+          {!busy && !error && !report && known > 0 && <p className="note">{known} accounts saved on this browser.</p>}
+          {listed.length > 0 && (
             <>
-              <p className="note">{added.length} new · {known} saved on this browser</p>
               <ul>
-                {added.slice(0, 8).map((candidate) => (
-                  <li key={candidate.username}>
+                {listed.slice(0, 12).map((candidate) => (
+                  <li key={`${candidate.source}-${candidate.username}`}>
                     @{candidate.username}
-                    <span> {candidate.source}{candidate.followers != null ? ` · ${candidate.followers}` : ''}</span>
+                    <span>
+                      {' '}
+                      {candidate.source}
+                      {candidate.followers != null ? ` · ${candidate.followers}` : ''}
+                    </span>
                   </li>
                 ))}
               </ul>
+              {listed.length > 12 && <p className="note">{listed.length - 12} more are in the saved list.</p>}
               <div className="row">
                 <button
                   type="button"
                   onClick={() => {
-                    void exportCandidates(added).then(notify).catch((error: unknown) => notify(error instanceof Error ? error.message : 'Export failed.'))
+                    void exportCandidates(listed)
+                      .then((message) => setReport(message))
+                      .catch((exportError: unknown) => setError(exportError instanceof Error ? exportError.message : 'Export failed.'))
                   }}
                 >
                   Export new
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void loadCandidates().then((all) => sendCandidatesToBatch(added.length > 0 ? added : all, DEFAULT_REELS, delayMs))
-                  }}
-                >
+                <button type="button" onClick={() => void sendCandidatesToBatch(listed, DEFAULT_REELS, delayMs)}>
                   Batch these
                 </button>
               </div>

@@ -1,4 +1,5 @@
-import { followerCount, followingPage, loadPage, similarAccounts } from './api'
+import { followerCount, followingPage, similarAccounts } from './api'
+import { loadReelsPage } from './reels-load'
 import { notify, patch } from './store'
 import { isRateLimited, reelsUrl } from '../lib/batch'
 import { collectPosts } from '../lib/instagram/collect'
@@ -181,46 +182,43 @@ async function runOnce(): Promise<void> {
     if (!(await pause(planned.job.settings.delayMs, signal))) return
     const latest = await loadSnowball()
     if (!latest || latest.status !== 'running') return
-    let followers: number | null = null
-    try {
-      followers = await followerCount(username)
-    } catch (error) {
-      const message = humanError(error)
-      if (isRateLimited(message)) {
-        await saveSnowball(pauseSnowball(latest, message))
-        notify(`${message} Resume the snowball from the popup when Instagram has calmed down.`)
-        return
-      }
-      followers = null
-    }
     if (signal.aborted) return
+    let collectedNow = 0
+    const showCollecting = (collected: number, label = `Snowball · @${username}`) => {
+      collectedNow = collected
+      patch({
+        phase: {
+          type: 'collecting',
+          collected,
+          label,
+          percent: latest.settings.reelsPerAccount > 0 ? Math.min(100, (collected / latest.settings.reelsPerAccount) * 100) : null,
+          scrolling: false,
+        },
+      })
+    }
+    let followers: number | null = null
     try {
       const result = await collectPosts({
         limit: latest.settings.reelsPerAccount,
         delayMs: latest.settings.delayMs,
         signal,
-        onProgress: (collected) => {
-          patch({
-            phase: {
-              type: 'collecting',
-              collected,
-              label: `Snowball · @${username}`,
-              percent: Math.min(100, (collected / latest.settings.reelsPerAccount) * 100),
-              scrolling: false,
-            },
-          })
-        },
-        load: (maxId) => loadPage({ kind: 'reels', username }, maxId),
+        onProgress: (collected) => showCollecting(collected),
+        load: (maxId) => loadReelsPage(username, maxId, signal, (message) => showCollecting(collectedNow, message)),
       })
+      try {
+        followers = await followerCount(username)
+      } catch {
+        followers = null
+      }
       if (signal.aborted || result.stopped) {
         await saveSnowball(pauseSnowball(latest, 'Paused.'))
         patch({ phase: { type: 'idle' } })
-        notify('Snowball paused. Resume it from the extension popup.')
+        notify('Snowball paused. Resume it from the research panel.')
         return
       }
       if (result.interrupted && isRateLimited(result.interrupted)) {
         await saveSnowball(pauseSnowball(latest, result.interrupted))
-        notify(`${result.interrupted} Resume the snowball from the popup when Instagram has calmed down.`)
+        notify(`${result.interrupted} Resume the snowball from the research panel when Instagram has calmed down.`)
         return
       }
       const error = result.posts.length === 0 ? result.interrupted || 'No reels came back. The account may be private.' : undefined
@@ -235,7 +233,7 @@ async function runOnce(): Promise<void> {
       const message = humanError(error)
       if (isRateLimited(message)) {
         await saveSnowball(pauseSnowball(latest, message))
-        notify(`${message} Resume the snowball from the popup when Instagram has calmed down.`)
+        notify(`${message} Resume the snowball from the research panel when Instagram has calmed down.`)
         return
       }
       await saveSnowball(applyScore(latest, { username, followers, posts: [], error: message }))
@@ -282,7 +280,7 @@ async function runOnce(): Promise<void> {
     const message = humanError(error)
     if (signal.aborted || isRateLimited(message)) {
       await saveSnowball(pauseSnowball(latest, signal.aborted ? 'Paused.' : message))
-      if (!signal.aborted) notify(`${message} Resume the snowball from the popup when Instagram has calmed down.`)
+      if (!signal.aborted) notify(`${message} Resume the snowball from the research panel when Instagram has calmed down.`)
       return
     }
     await saveSnowball(markExpanded(applyCandidates(latest, username, incoming), username))

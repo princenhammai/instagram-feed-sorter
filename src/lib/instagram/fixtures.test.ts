@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { applyAccountOutcome, createJob, isRateLimited, scoreAccount, uniquePosts } from '../batch'
+import { httpFailureMessage, responseSnippet } from './page-data'
 import { withResearch } from '../research'
 import { extractFollowerCounts, extractItems, extractNext, extractUsers } from './extract'
 import { clipsPage, clipsPageEnd, followingPage, privateBody, profileSuggestions, rateLimitBody } from './fixtures'
@@ -58,6 +59,16 @@ describe('instagram response fixtures', () => {
 
     expect(isRateLimited(rateLimitBody.message)).toBe(true)
     expect(isRateLimited(String(rateLimitBody.feedback_title))).toBe(true)
+    const http429 = httpFailureMessage(429, JSON.stringify(rateLimitBody))
+    expect(http429).toBe('HTTP 429 from Instagram. Please wait a few minutes before you try again. Try Again Later')
+    expect(isRateLimited(http429, 429)).toBe(true)
+    expect(isRateLimited('user id 4290012345 loaded 12 reels')).toBe(false)
+    expect(isRateLimited(`${'x'.repeat(230)} try again later`)).toBe(false)
+    expect(responseSnippet('<!doctype html><html>try again later</html>')).toBe('Instagram returned HTML instead of JSON.')
+    const paused = applyAccountOutcome(saved.job, 'bob', { followers: null, posts: [], thrown: http429 }, new Set(), 11)
+    expect(paused.type).toBe('pause')
+    expect(paused.job.index).toBe(1)
+    expect(paused.job.note).toContain('HTTP 429')
     const limited = applyAccountOutcome(saved.job, 'bob', { followers: null, posts: [], thrown: rateLimitBody.message }, new Set(), 11)
     expect(limited.type).toBe('pause')
     expect(limited.job.index).toBe(1)

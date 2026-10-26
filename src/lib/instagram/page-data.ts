@@ -31,3 +31,29 @@ export class HttpError extends Error {
 export function isRateLimit(error: unknown): boolean {
   return error instanceof HttpError && error.status === 429
 }
+
+export function responseSnippet(body: string, limit = 180): string {
+  const trimmed = body.replace(/^\uFEFF/, '').trim()
+  if (!trimmed) return ''
+  if (trimmed.startsWith('<') || /^<!doctype html/i.test(trimmed)) return 'Instagram returned HTML instead of JSON.'
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const record = parsed as Record<string, unknown>
+      const bits = ['feedback_message', 'message', 'feedback_title']
+        .map((key) => record[key])
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        .map((value) => value.trim())
+      if (bits.length > 0) return bits.join(' ').replace(/\s+/g, ' ').slice(0, limit)
+    }
+  } catch {
+    // A non-JSON body is quoted as text below.
+  }
+  return trimmed.replace(/\s+/g, ' ').slice(0, limit)
+}
+
+export function httpFailureMessage(status: number, body: string): string {
+  const snippet = responseSnippet(body)
+  const head = `HTTP ${status} from Instagram.`
+  return snippet ? `${head} ${snippet}` : head
+}
