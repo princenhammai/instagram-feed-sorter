@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import JSZip from 'jszip'
+import { exportColumns, toCsv } from './export'
 import { buildXlsx, columnName } from './xlsx'
-import { filesForPost, isAllowedMediaUrl, needsZip } from './media-files'
+import { buildDataUrl, describeSavedFile, downloadNames, judgeDownload, nextStrategy, queuedVerdict, runSaveAttempts, startFailureCode, textToBase64 } from './file-download'
+import { filesForPost, isAllowedMediaUrl, needsZip, rankedVideoName, videoDownloadUrl } from './media-files'
 import { samplePost } from './sample'
 
 describe('xlsx', () => {
@@ -50,5 +52,63 @@ describe('media files', () => {
     expect(filesForPost(samplePost({ mediaKind: 'video', videoUrl: null }))).toEqual([])
     expect(filesForPost(video, 0)[0]?.name).toBe('001-creator-abc.mp4')
     expect(filesForPost(video, 11)[0]?.name).toBe('012-creator-abc.mp4')
+    expect(rankedVideoName(1, 10, 'AbC')).toBe('rank01_AbC.mp4')
+    expect(rankedVideoName(12, 200, 'AbC')).toBe('rank012_AbC.mp4')
+    expect(videoDownloadUrl(video)).toBe('https://scontent.cdninstagram.com/video.mp4')
+    expect(videoDownloadUrl(samplePost({ mediaKind: 'video', videoUrl: null }))).toBeNull()
+  })
+})
+
+describe('file downloads', () => {
+  it('treats a queued download as unfinished until Chrome says the file is complete', () => {
+    expect(judgeDownload({ state: 'in_progress' })).toEqual({ done: false })
+    expect(judgeDownload({ state: 'complete', filename: '/home/ada/Downloads/Instagram Feed Sorter/reels.csv' }).done).toBe(true)
+    expect(judgeDownload({ state: 'interrupted', error: 'NETWORK_FAILED' })).toMatchObject({
+      done: true,
+      ok: false,
+      code: 'NETWORK_FAILED',
+    })
+    expect(judgeDownload(null)).toMatchObject({ done: true, ok: false })
+    expect(queuedVerdict({ state: 'in_progress' }).ok).toBe(true)
+    expect(queuedVerdict(null).ok).toBe(false)
+  })
+
+  it('retries a folder path once, then switches save method when the file itself was rejected', async () => {
+    expect(downloadNames('Instagram Feed Sorter/ada-reels.csv')).toEqual([
+      'Instagram Feed Sorter/ada-reels.csv',
+      'ada-reels.csv',
+    ])
+    expect(nextStrategy({ ok: false, code: 'FILE_FAILED' })).toBe('rename')
+    expect(nextStrategy({ ok: false, code: 'NETWORK_FAILED' })).toBe('next-method')
+    expect(startFailureCode('Invalid filename')).toBe('FILE_FAILED')
+    expect(startFailureCode('Invalid URL')).toBe('NETWORK_INVALID_REQUEST')
+    expect(nextStrategy({ ok: false, code: startFailureCode('Invalid filename') })).toBe('rename')
+    const calls: string[] = []
+    const saved = await runSaveAttempts(['folder/file.csv', 'file.csv'], [
+      async (name) => {
+        calls.push(`data:${name}`)
+        return { ok: false, error: 'rejected', code: 'NETWORK_INVALID_REQUEST' }
+      },
+      async (name) => {
+        calls.push(`blob:${name}`)
+        return name === 'file.csv' ? { ok: true, filename: `/tmp/Downloads/${name}` } : { ok: false, error: 'path', code: 'FILE_FAILED' }
+      },
+    ])
+    expect(saved).toMatchObject({ ok: true, filename: '/tmp/Downloads/file.csv' })
+    expect(calls).toEqual(['data:folder/file.csv', 'blob:folder/file.csv', 'blob:file.csv'])
+  })
+
+  it('round-trips a CSV through a data URL and names the downloads folder', () => {
+    const csv = toCsv(exportColumns(), [samplePost({ caption: 'bench day', views: 94000 })])
+    const url = buildDataUrl('text/csv;charset=utf-8', textToBase64(csv))
+    expect(url).toBeTruthy()
+    const bytes = Uint8Array.from(atob(url!.split(',')[1] ?? ''), (char) => char.charCodeAt(0))
+    expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf])
+    const decoded = new TextDecoder().decode(bytes)
+    expect(decoded).toBe(csv.replace(/^\uFEFF/, ''))
+    expect(decoded).toContain('Duration (s)')
+    expect(describeSavedFile('/home/ada/Downloads/Instagram Feed Sorter/ada-reels.csv')).toBe(
+      'Downloads/Instagram Feed Sorter/ada-reels.csv',
+    )
   })
 })

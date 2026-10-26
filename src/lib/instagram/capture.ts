@@ -30,6 +30,8 @@ export function fillMissingMedia(current: Post, extra: Post): Post {
     videoLowUrl: current.videoLowUrl || extra.videoLowUrl,
     coverUrl: current.coverUrl || extra.coverUrl,
     duration: current.duration ?? extra.duration ?? null,
+    audio: current.audio || extra.audio || null,
+    paidPartnership: Boolean(current.paidPartnership || extra.paidPartnership),
     views: current.views ?? extra.views,
     likes: current.likes ?? extra.likes,
     comments: current.comments ?? extra.comments,

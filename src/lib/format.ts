@@ -52,8 +52,12 @@ export function formatDateTime(ms: number): string {
 
 export function cornerLabel(post: Post, sortKey: SortKey): string {
   if (sortKey === 'outlier') return post.outlierScore == null ? '—' : `⚡ ${formatMultiple(post.outlierScore)}`
+  if (sortKey === 'median') return post.medianScore == null ? '—' : formatMultiple(post.medianScore)
+  if (sortKey === 'likeRate') return formatPercent(post.likeRate)
+  if (sortKey === 'commentRate') return formatPercent(post.commentRate)
   if (sortKey === 'comments') return `💬 ${formatCount(post.comments)}`
   if (sortKey === 'engagement') return `↗ ${formatPercent(post.engagementRate)}`
+  if (sortKey === 'duration') return formatDuration(post.duration)
   if (sortKey === 'likes') return `♥ ${formatCount(post.likes)}`
   if (post.mediaKind !== 'image' && post.views != null) return `▶ ${formatCount(post.views)}`
   return `♥ ${formatCount(post.likes)}`

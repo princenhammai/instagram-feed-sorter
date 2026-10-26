@@ -41,8 +41,35 @@ describe('reel details', () => {
       ],
     })
     expect(post?.duration).toBe(31.4)
+    expect(post?.audio).toBeNull()
+    expect(post?.paidPartnership).toBe(false)
     expect(post?.videoUrl).toContain('big.mp4')
     expect(post?.videoLowUrl).toContain('small.mp4')
+  })
+
+  it('reads the song, a paid partnership, and duration when the clip payload has them', () => {
+    const post = normalizeMedia({
+      pk: '2',
+      code: 'Song',
+      media_type: 2,
+      product_type: 'clips',
+      is_paid_partnership: true,
+      sponsor_tags: [{ sponsor: { username: 'kaiserpermanente' } }],
+      clips_metadata: {
+        music_info: { music_asset_info: { title: 'Night Drive', display_artist: 'Ada' } },
+      },
+    })
+    expect(post?.audio).toBe('Night Drive — Ada')
+    expect(post?.paidPartnership).toBe(true)
+
+    const original = normalizeMedia({
+      pk: '3',
+      code: 'Orig',
+      media_type: 2,
+      clips_metadata: { video_duration: 18.5, original_sound_info: { original_audio_title: 'Original audio', ig_artist: { username: 'ada' } } },
+    })
+    expect(original?.duration).toBe(18.5)
+    expect(original?.audio).toBe('Original audio — ada')
   })
 
   it('finds follower counts in profile payloads', () => {

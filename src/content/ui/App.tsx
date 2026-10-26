@@ -6,6 +6,7 @@ import {
   closeSimilar,
   createFolder,
   downloadPosts,
+  downloadRanked,
   downloadShortcode,
   exportPosts,
   exportSimilar,
@@ -46,6 +47,10 @@ const SORT_LABEL: Record<SortKey, string> = {
   comments: 'Comments',
   outlier: 'Outlier score',
   engagement: 'Engagement rate',
+  duration: 'Duration',
+  median: '× median',
+  likeRate: 'Likes / views',
+  commentRate: 'Comments / views',
   newest: 'Newest',
   oldest: 'Oldest',
 }
@@ -141,6 +146,10 @@ const TITLE: Record<SortKey, string> = {
   comments: 'Most comments',
   outlier: 'Above this account’s usual',
   engagement: 'Highest engagement',
+  duration: 'Longest videos',
+  median: 'Highest × median views',
+  likeRate: 'Highest likes per view',
+  commentRate: 'Highest comments per view',
   newest: 'Newest first',
   oldest: 'Oldest first',
 }
@@ -163,11 +172,16 @@ function Workspace({ model }: { model: ReadyModel }) {
   const [menu, setMenu] = useState<'sort' | 'export' | null>(null)
   const [query, setQuery] = useState('')
   const [shown, setShown] = useState(PAGE)
+  const [topCount, setTopCount] = useState(10)
   const sentinel = useRef<HTMLDivElement | null>(null)
 
   const sorted = useMemo(() => sortPosts(model.posts, sortKey), [model.posts, sortKey])
   const searched = useMemo(() => searchPosts(sorted, query), [sorted, query])
   const visible = useMemo(() => applyFilters(searched, applied), [searched, applied])
+  const paidCount = useMemo(
+    () => applyFilters(searched, { ...applied, hidePaid: false }).filter((post) => post.likelyPaid).length,
+    [searched, applied],
+  )
   const bolts = useMemo(() => boltTiers(sortKey === 'outlier' ? visible : []), [sortKey, visible])
   const previewCount = applyFilters(searched, draft).length
   const target = selecting ? postsInOrder(visible, selected) : visible
@@ -332,6 +346,41 @@ function Workspace({ model }: { model: ReadyModel }) {
           <button type="button" className="ghost muted" disabled={!active} onClick={clearAll}>
             Clear all
           </button>
+          <button
+            type="button"
+            className={applied.hidePaid ? 'ghost dot' : 'ghost'}
+            aria-pressed={applied.hidePaid}
+            onClick={() => {
+              const next = { ...applied, hidePaid: !applied.hidePaid }
+              setApplied(next)
+              setDraft(next)
+            }}
+          >
+            Hide likely paid
+            <span className="count">{paidCount}</span>
+          </button>
+          <div className="row top-n">
+            <button
+              type="button"
+              className="ghost"
+              disabled={visible.length === 0 || Boolean(snap.download)}
+              title="Saves rank01_shortcode.mp4 and the rest of this sort into Downloads, with no save dialog per file."
+              onClick={() => {
+                const count = Math.max(1, Math.min(visible.length, Math.floor(topCount) || 1))
+                void downloadRanked(model.surface, visible.slice(0, count))
+              }}
+            >
+              Download top
+            </button>
+            <input
+              type="number"
+              min={1}
+              max={Math.max(1, visible.length)}
+              value={topCount}
+              aria-label="How many videos to download from the top of this sort"
+              onChange={(event) => setTopCount(Number(event.target.value))}
+            />
+          </div>
         </div>
         <div className="row">
           <input
@@ -483,10 +532,23 @@ function Workspace({ model }: { model: ReadyModel }) {
                     <span>♥ {formatCount(post.likes)}</span>
                     <span>💬 {formatCount(post.comments)}</span>
                     <span>↗ {formatPercent(post.engagementRate)}</span>
+                    {post.medianScore != null && <span>{formatMultiple(post.medianScore)} median</span>}
+                    {post.likeRate != null && <span>♥/▶ {formatPercent(post.likeRate)}</span>}
+                    {post.commentRate != null && <span>💬/▶ {formatPercent(post.commentRate)}</span>}
                     {post.outlierScore != null && <span>⚡ {formatMultiple(post.outlierScore)}</span>}
                   </span>
                 </button>
                 {post.caption && <p className="blurb">{post.caption.split('\n')[0]}</p>}
+                {(post.likelyPaid || post.medianScore != null || post.likeRate != null || post.commentRate != null || post.duration != null || post.audio) && (
+                  <p className="meta-line">
+                    {post.likelyPaid && <span className="paid">Likely paid</span>}
+                    {post.medianScore != null && <span>{formatMultiple(post.medianScore)} median</span>}
+                    {post.likeRate != null && <span>{formatPercent(post.likeRate)} likes</span>}
+                    {post.commentRate != null && <span>{formatPercent(post.commentRate)} comments</span>}
+                    {post.duration != null && <span>{formatDuration(post.duration)}</span>}
+                    {post.audio && <span className="audio">{post.audio}</span>}
+                  </p>
+                )}
                 {bolts.get(post.id) ? <span className="bolts">{'⚡'.repeat(bolts.get(post.id) ?? 1)}</span> : null}
                 {selecting && (
                   <button type="button" className="check" aria-pressed={picked} onClick={() => toggle(post)}>
@@ -886,10 +948,28 @@ function DetailModal({
             </div>
             <div>
               <dt>Duration</dt>
-              <dd>{formatDuration(post.duration)}</dd>
+              <dd className={sortKey === 'duration' ? 'hot' : undefined}>{formatDuration(post.duration)}</dd>
+            </div>
+            <div>
+              <dt>× median</dt>
+              <dd className={sortKey === 'median' ? 'hot' : undefined}>
+                {post.medianScore == null ? '—' : formatMultiple(post.medianScore)}
+              </dd>
+            </div>
+            <div>
+              <dt>Likes / views</dt>
+              <dd className={sortKey === 'likeRate' ? 'hot' : undefined}>{formatPercent(post.likeRate)}</dd>
+            </div>
+            <div>
+              <dt>Comments / views</dt>
+              <dd className={sortKey === 'commentRate' ? 'hot' : undefined}>{formatPercent(post.commentRate)}</dd>
             </div>
           </dl>
           <p className="note">Published {formatDateTime(post.takenAt)}</p>
+          {post.audio && <p className="note">Audio · {post.audio}</p>}
+          {post.likelyPaid && (
+            <p className="paid-note">Likely paid{post.paidSignals && post.paidSignals.length > 0 ? ` · ${post.paidSignals.join(', ')}` : ''}</p>
+          )}
           <div className="actions start">
             <SaveMenu label="Save" up onPick={(folder) => void savePost(post, folder)} />
             <button type="button" className="outline" disabled={transcript.loading || !hasVideo(post)} onClick={() => void runTranscribe(false)}>

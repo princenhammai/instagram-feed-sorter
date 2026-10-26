@@ -1,5 +1,18 @@
 import { bridgeSnapshot, startBridge } from './bridge'
 import { createFolder, INBOX_ID, listFolders, putSaved, type SavedPost } from '../lib/db'
+import {
+  beginDownload,
+  buildDataUrl,
+  confirmChromeDownload,
+  downloadNames,
+  findDownload,
+  pathFailure,
+  queuedVerdict,
+  runSaveAttempts,
+  startFailureCode,
+  textToBase64,
+  type SaveAttempt,
+} from '../lib/file-download'
 import { isAllowedMediaUrl, isInstagramUrl } from '../lib/media-files'
 import { sapisidToken, sheetUploadBody } from '../lib/sheets'
 import { loadSettings } from '../lib/settings'
@@ -15,6 +28,7 @@ const MAX_BYTES = 400 * 1024 * 1024
 let activeTabId: number | undefined
 let zipBusy = false
 let opening: Promise<void> | null = null
+let rankGeneration = 0
 
 async function ensureOffscreen(): Promise<void> {
   const url = chrome.runtime.getURL('offscreen.html')
@@ -66,6 +80,172 @@ function cleanFilename(filename: unknown): string | null {
   const cleaned = filename.replace(/^\/+/, '')
   if (!cleaned || cleaned.includes('..') || cleaned.length > 180) return null
   return cleaned
+}
+
+function cleanRanked(entries: unknown): { name: string; url: string }[] {
+  if (!Array.isArray(entries)) return []
+  const files: { name: string; url: string }[] = []
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') continue
+    const name = cleanFilename((entry as { name?: unknown }).name)
+    const url = (entry as { url?: unknown }).url
+    if (!name || typeof url !== 'string' || !name.endsWith('.mp4') || !isAllowedMediaUrl(url)) continue
+    files.push({ name, url })
+    if (files.length >= 500) break
+  }
+  return files
+}
+
+function reportRank(done: number, total: number): void {
+  if (activeTabId == null) return
+  void chrome.tabs.sendMessage(activeTabId, { type: 'DOWNLOAD_PROGRESS', done, total }).catch(() => undefined)
+}
+
+async function tryDataUrl(url: string, filename: string): Promise<SaveAttempt> {
+  try {
+    const id = await beginDownload({ url, filename, conflictAction: 'uniquify', saveAs: false })
+    return confirmChromeDownload(id, 15_000)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Chrome rejected the export.'
+    return { ok: false, error: message, code: startFailureCode(message) }
+  }
+}
+
+async function saveViaOffscreen(filename: string, mime: string, base64: string): Promise<SaveAttempt> {
+  try {
+    await ensureOffscreen()
+    const response = (await chrome.runtime.sendMessage({
+      target: 'offscreen',
+      type: 'FILE',
+      filename,
+      mime,
+      base64,
+      saveAs: false,
+    })) as { ok?: boolean; id?: number; error?: string } | undefined
+    if (!response?.ok || typeof response.id !== 'number') {
+      return { ok: false, error: response?.error || 'Chrome did not start the export.' }
+    }
+    return confirmChromeDownload(response.id, 15_000)
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Chrome did not start the export.' }
+  }
+}
+
+async function pingSaver(): Promise<boolean> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      const response = (await chrome.runtime.sendMessage({ target: 'saver', type: 'PING' })) as { ok?: boolean } | undefined
+      if (response?.ok) return true
+    } catch {
+      // The saver window is still opening.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  return false
+}
+
+async function saveViaSaverPage(filename: string, mime: string, base64: string): Promise<SaveAttempt> {
+  let windowId: number | undefined
+  try {
+    const created = await chrome.windows.create({
+      url: chrome.runtime.getURL('saver.html'),
+      type: 'popup',
+      focused: false,
+      width: 420,
+      height: 160,
+    })
+    windowId = created.id
+    if (!(await pingSaver())) return { ok: false, error: 'Could not open a window to save the file.' }
+    const response = (await chrome.runtime.sendMessage({
+      target: 'saver',
+      type: 'SAVE',
+      filename,
+      mime,
+      base64,
+    })) as { ok?: boolean; id?: number; error?: string } | undefined
+    if (!response?.ok || typeof response.id !== 'number') {
+      return { ok: false, error: response?.error || 'Chrome did not start the export.' }
+    }
+    const attempt = await confirmChromeDownload(response.id, 15_000)
+    if (attempt.ok) await new Promise((resolve) => setTimeout(resolve, 500))
+    return attempt
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Could not open a window to save the file.' }
+  } finally {
+    if (windowId != null) await chrome.windows.remove(windowId).catch(() => undefined)
+  }
+}
+
+async function saveGenerated(filename: string, mime: string, base64: string): Promise<SaveAttempt> {
+  const dataUrl = buildDataUrl(mime, base64)
+  const methods: Array<(name: string) => Promise<SaveAttempt>> = []
+  if (dataUrl) methods.push((name) => tryDataUrl(dataUrl, name))
+  methods.push((name) => saveViaOffscreen(name, mime, base64))
+  methods.push((name) => saveViaSaverPage(name, mime, base64))
+  return runSaveAttempts(downloadNames(filename), methods)
+}
+
+async function downloadRanked(files: { name: string; url: string }[]): Promise<{
+  ok: boolean
+  saved: number
+  failed: number
+  stopped: boolean
+  error?: string
+}> {
+  const generation = rankGeneration
+  const started: { id: number; name: string; url: string }[] = []
+  const errors: string[] = []
+  for (let index = 0; index < files.length; index += 1) {
+    if (generation !== rankGeneration) {
+      await Promise.all(started.map((item) => chrome.downloads.cancel(item.id).catch(() => undefined)))
+      return { ok: false, saved: 0, failed: files.length, stopped: true, error: 'Download stopped.' }
+    }
+    const file = files[index]
+    try {
+      const id = await beginDownload({ url: file.url, filename: file.name, conflictAction: 'uniquify', saveAs: false })
+      started.push({ id, name: file.name, url: file.url })
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : 'Chrome did not start the download.')
+    }
+    reportRank(index + 1, files.length)
+  }
+  await new Promise((resolve) => setTimeout(resolve, 1200))
+  if (generation !== rankGeneration) {
+    await Promise.all(started.map((item) => chrome.downloads.cancel(item.id).catch(() => undefined)))
+    return { ok: false, saved: 0, failed: files.length, stopped: true, error: 'Download stopped.' }
+  }
+  let saved = 0
+  for (const item of started) {
+    const verdict = queuedVerdict(await findDownload(item.id))
+    if (verdict.ok) {
+      saved += 1
+      continue
+    }
+    const flat = item.name.split('/').filter(Boolean).pop()
+    if (flat && flat !== item.name && pathFailure(verdict.code)) {
+      try {
+        const id = await beginDownload({ url: item.url, filename: flat, conflictAction: 'uniquify', saveAs: false })
+        await new Promise((resolve) => setTimeout(resolve, 400))
+        const retry = queuedVerdict(await findDownload(id))
+        if (retry.ok) {
+          saved += 1
+          continue
+        }
+        errors.push(retry.error)
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : verdict.error)
+      }
+      continue
+    }
+    errors.push(verdict.error)
+  }
+  return {
+    ok: saved > 0,
+    saved,
+    failed: errors.length,
+    stopped: false,
+    error: errors[0],
+  }
 }
 
 function cleanEntries(entries: unknown): { name: string; url: string }[] {
@@ -356,16 +536,21 @@ async function handle(message: Record<string, unknown>, sender: chrome.runtime.M
   if (message.type === 'DOWNLOAD_TEXT' || message.type === 'DOWNLOAD_BYTES') {
     const filename = cleanFilename(message.filename)
     if (!filename || typeof message.mime !== 'string') return { ok: false, error: 'Could not name that export.' }
-    await ensureOffscreen()
-    return chrome.runtime.sendMessage({
-      target: 'offscreen',
-      type: 'FILE',
-      filename,
-      mime: message.mime,
-      text: message.text,
-      base64: message.base64,
-      saveAs: Boolean(message.saveAs),
-    })
+    const base64 = typeof message.base64 === 'string' ? message.base64 : typeof message.text === 'string' ? textToBase64(message.text) : ''
+    if (!base64 && message.type === 'DOWNLOAD_BYTES') return { ok: false, error: 'That export was empty.' }
+    return saveGenerated(filename, message.mime, base64)
+  }
+
+  if (message.type === 'DOWNLOAD_RANKED') {
+    const files = cleanRanked(message.files)
+    if (files.length === 0) return { ok: false, error: 'Nothing safe to download.', saved: 0, failed: 0, stopped: false }
+    activeTabId = sender.tab?.id
+    return downloadRanked(files)
+  }
+
+  if (message.type === 'CANCEL_RANKED') {
+    rankGeneration += 1
+    return { ok: true }
   }
 
   if (message.type === 'DOWNLOAD_ZIP') {
@@ -417,7 +602,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     return false
   }
-  if (message?.target === 'offscreen') return false
+  if (message?.target === 'offscreen' || message?.target === 'saver') return false
   void handle(message ?? {}, sender)
     .then(sendResponse)
     .catch((error: unknown) => {
@@ -430,12 +615,14 @@ const bridgeDeps = {
   keepAwake: ensureOffscreen,
   createSheet: createGoogleSheet,
   saveText: async (filename: string, mime: string, text: string) => {
-    await ensureOffscreen()
-    return chrome.runtime.sendMessage({ target: 'offscreen', type: 'FILE', filename, mime, text, saveAs: false })
+    const cleaned = cleanFilename(filename)
+    if (!cleaned) return { ok: false, error: 'Could not name that export.' }
+    return saveGenerated(cleaned, mime, textToBase64(text))
   },
   saveBytes: async (filename: string, mime: string, base64: string) => {
-    await ensureOffscreen()
-    return chrome.runtime.sendMessage({ target: 'offscreen', type: 'FILE', filename, mime, base64, saveAs: false })
+    const cleaned = cleanFilename(filename)
+    if (!cleaned) return { ok: false, error: 'Could not name that export.' }
+    return saveGenerated(cleaned, mime, base64)
   },
 }
 

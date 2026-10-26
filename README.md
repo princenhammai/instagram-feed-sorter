@@ -32,11 +32,12 @@ The extension is portable across desktop operating systems. GitHub hosting does 
 
 ## Features
 
-- Sort by views, likes, comments, outlier score, engagement rate, newest or oldest.
+- Sort by views, likes, comments, outlier score, engagement rate, duration, views versus the median of the loaded set, likes per view, comments per view, newest or oldest.
 - Select 25, 50, 100, 200, 1000, all or a custom number; use date presets or a custom range where supported.
-- Filter results and inspect them in the built-in player or on Instagram.
-- Export Google Sheets, Excel, CSV, JSON or clipboard data.
-- Download media and keep posts in local folders with the Library.
+- Filter results, hide likely-paid posts, and inspect them in the built-in player or on Instagram. A post is marked likely paid when the caption has `#ad`, `#sponsored`, or a paid-partnership tag, when Instagram marks it as a paid partnership, or when its likes per view are under 10% of the loaded set's median like rate while its views are at least that median.
+- Show the audio or song name and video duration when Instagram includes them.
+- Export Google Sheets, Excel, CSV, JSON or clipboard data. CSV, JSON and Excel files are written into the downloads folder, and a failed save is reported instead of a success message.
+- Download the top videos in the current sort as `rank01_<shortcode>.mp4` with no save dialog per file. Download other media and keep posts in local folders with the Library.
 - Optional video transcription using your own Whisper-compatible provider/key.
 - View related accounts suggested by Instagram from the Sorter overlay.
 

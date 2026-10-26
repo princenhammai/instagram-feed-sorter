@@ -6,7 +6,19 @@ import { SAFETY_CAP, type DatePreset, type Post, type RangeChoice, type Sortable
 export const BRIDGE_PORT = 47331
 export const BRIDGE_HOST = '127.0.0.1'
 
-export const AGENT_SORTS = ['views', 'likes', 'comments', 'outlier', 'engagement', 'newest', 'oldest'] as const
+export const AGENT_SORTS = [
+  'views',
+  'likes',
+  'comments',
+  'outlier',
+  'engagement',
+  'duration',
+  'median',
+  'likeRate',
+  'commentRate',
+  'newest',
+  'oldest',
+] as const
 export const AGENT_SINCE = ['none', '7d', '30d', '90d', '180d', '365d'] as const
 export const AGENT_FORMATS = ['none', 'csv', 'json', 'sheets', 'excel'] as const
 
@@ -38,6 +50,11 @@ export interface AgentRow {
   durationSeconds: number | null
   outlierScore: number | null
   engagementPercent: number | null
+  medianMultiple: number | null
+  likeRatePercent: number | null
+  commentRatePercent: number | null
+  audio: string | null
+  likelyPaid: boolean
   mediaKind: Post['mediaKind']
 }
 
@@ -219,6 +236,11 @@ export function agentRows(posts: Post[], show: number): AgentRow[] {
     durationSeconds: round(post.duration, 1),
     outlierScore: round(post.outlierScore, 2),
     engagementPercent: round(post.engagementRate == null ? null : post.engagementRate * 100, 2),
+    medianMultiple: round(post.medianScore, 2),
+    likeRatePercent: round(post.likeRate == null ? null : post.likeRate * 100, 2),
+    commentRatePercent: round(post.commentRate == null ? null : post.commentRate * 100, 2),
+    audio: post.audio ?? null,
+    likelyPaid: Boolean(post.likelyPaid),
     mediaKind: post.mediaKind,
   }))
 }

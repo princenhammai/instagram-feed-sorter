@@ -20,6 +20,30 @@ const SORTS: { key: SortKey; label: string; icon: string; hint?: string }[] = [
     icon: '↗',
     hint: '(Likes + comments) ÷ views. Posts without views use the follower count instead.',
   },
+  {
+    key: 'duration',
+    label: 'Duration',
+    icon: '⏱',
+    hint: 'Video length, when Instagram includes it. The same duration is the Duration column in CSV and Excel.',
+  },
+  {
+    key: 'median',
+    label: '× median',
+    icon: '×',
+    hint: 'Views divided by the median views of the posts loaded for this sort.',
+  },
+  {
+    key: 'likeRate',
+    label: 'Likes / views',
+    icon: '♥',
+    hint: 'Likes divided by views. Useful for spotting posts that reached a lot of people but earned few likes.',
+  },
+  {
+    key: 'commentRate',
+    label: 'Comments / views',
+    icon: '▭',
+    hint: 'Comments divided by views.',
+  },
   { key: 'newest', label: 'Newest', icon: '◴' },
   { key: 'oldest', label: 'Oldest', icon: '◷' },
 ]
