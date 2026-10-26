@@ -4,6 +4,19 @@ import type { Post } from './types'
 export const LOW_LIKE_RATE_RATIO = 0.1
 
 const DISCLOSURE = /#(?:ad|sponsored|paidpartnership|paidpartner)(?![\p{L}\p{N}_])/giu
+const HASHTAG = /#[\p{L}\p{N}_]+/gu
+const MENTION = /@[\p{L}\p{N}._]+/gu
+
+/** First caption line that still says something after tags and mentions are removed. */
+export function captionHook(caption: string, max = 110): string {
+  for (const line of caption.split(/\r?\n/)) {
+    const cleaned = line.replace(HASHTAG, ' ').replace(MENTION, ' ').replace(/\s+/g, ' ').trim()
+    if (cleaned.length < 2) continue
+    if (cleaned.length <= max) return cleaned
+    return `${cleaned.slice(0, max - 1).trimEnd()}…`
+  }
+  return ''
+}
 
 export function median(values: number[]): number | null {
   if (values.length === 0) return null

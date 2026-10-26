@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import JSZip from 'jszip'
 import { exportColumns, toCsv } from './export'
-import { buildXlsx, columnName } from './xlsx'
+import { buildWorkbook, buildXlsx, columnName } from './xlsx'
 import { buildDataUrl, describeSavedFile, downloadNames, judgeDownload, nextStrategy, queuedVerdict, runSaveAttempts, startFailureCode, textToBase64 } from './file-download'
 import { filesForPost, isAllowedMediaUrl, needsZip, rankedVideoName, videoDownloadUrl } from './media-files'
 import { samplePost } from './sample'
@@ -19,6 +19,13 @@ describe('xlsx', () => {
     const sheet = await zip.file('xl/worksheets/sheet1.xml')?.async('string')
     expect(sheet).toContain('a &amp; b')
     expect(sheet).toContain('<v>12</v>')
+    const book = await buildWorkbook([
+      { name: 'Reels', rows: [['Account'], ['ada']] },
+      { name: 'Summary', rows: [['Reels loaded'], [2]] },
+    ])
+    const workbook = await JSZip.loadAsync(book)
+    expect(await workbook.file('xl/worksheets/sheet2.xml')?.async('string')).toContain('Reels loaded')
+    expect(await workbook.file('xl/workbook.xml')?.async('string')).toContain('Summary')
   })
 })
 
@@ -52,8 +59,8 @@ describe('media files', () => {
     expect(filesForPost(samplePost({ mediaKind: 'video', videoUrl: null }))).toEqual([])
     expect(filesForPost(video, 0)[0]?.name).toBe('001-creator-abc.mp4')
     expect(filesForPost(video, 11)[0]?.name).toBe('012-creator-abc.mp4')
-    expect(rankedVideoName(1, 10, 'AbC')).toBe('rank01_AbC.mp4')
-    expect(rankedVideoName(12, 200, 'AbC')).toBe('rank012_AbC.mp4')
+    expect(rankedVideoName(1, 10, 'AbC', 'omgadrian')).toBe('rank01_omgadrian_AbC.mp4')
+    expect(rankedVideoName(12, 200, 'AbC', 'omgadrian')).toBe('rank012_omgadrian_AbC.mp4')
     expect(videoDownloadUrl(video)).toBe('https://scontent.cdninstagram.com/video.mp4')
     expect(videoDownloadUrl(samplePost({ mediaKind: 'video', videoUrl: null }))).toBeNull()
   })

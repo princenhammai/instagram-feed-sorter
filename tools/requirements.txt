@@ -1,0 +1,4 @@
+# Local speech-to-text. Contact sheets and scene cuts need only ffmpeg and ffprobe.
+# Install instructions: INSTALL.md
+faster-whisper
+

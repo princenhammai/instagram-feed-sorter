@@ -13,6 +13,7 @@ export type MainAction =
   | 'similar'
   | 'captured'
   | 'followers'
+  | 'following'
 
 export interface MainCall {
   action: MainAction

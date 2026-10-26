@@ -1,4 +1,6 @@
 import { enrichPost, hasPlayableVideo, loadPage, mediaByShortcode, resetReelsSource, similarAccounts, storyPosts } from './api'
+import { batchIsActive, consumeBatchLeave, loadJob, markPaused, markResumed, onBatchResume, resumeBatch } from './batch-run'
+import { reelsUrl } from '../lib/batch'
 import { callMain } from './bridge'
 import { downloadToFolder, pickFolder } from './downloads'
 import { CLOSED_SIMILAR, getSnap, notify, patch, type DownloadState } from './store'
@@ -72,16 +74,39 @@ export function init(): void {
   window.setInterval(() => {
     if (location.href !== getSnap().href) onNavigate()
   }, 800)
-  resumePendingSort()
+  onBatchResume(
+    () => {
+      void resumeBatch()
+    },
+    () => {
+      collectAbort?.abort()
+      const controller = new AbortController()
+      collectAbort = controller
+      return controller.signal
+    },
+  )
+  void loadJob().then((job) => {
+    if (job?.status === 'running') void resumeBatch()
+    else resumePendingSort()
+  })
 }
 
 export function onNavigate(): void {
   const href = location.href
   if (href === getSnap().href) return
   const wasOpen = getSnap().phase.type !== 'idle'
-  invalidate()
-  patch({ href, phase: { type: 'idle' }, similar: CLOSED_SIMILAR })
-  if (wasOpen) notify('Closed the sorted grid because this tab opened another Instagram page.')
+  const leaving = consumeBatchLeave()
+  const batching = leaving || batchIsActive()
+  if (!leaving) invalidate()
+  patch({ href, phase: leaving ? getSnap().phase : { type: 'idle' }, similar: CLOSED_SIMILAR, batch: batching ? getSnap().batch : null })
+  if (wasOpen && !batching) notify('Closed the sorted grid because this tab opened another Instagram page.')
+  if (leaving) {
+    window.setTimeout(() => {
+      void resumeBatch()
+    }, 0)
+    return
+  }
+  if (batching) void resumeBatch()
 }
 
 export function closeOverlay(): void {
@@ -558,7 +583,7 @@ export async function downloadRanked(surface: Surface, posts: Post[]): Promise<v
         return
       }
       files.push({
-        name: downloadName(`${safeSegment(zipStem(surface))}/${rankedVideoName(index + 1, ready.length, post.shortcode)}`),
+        name: downloadName(`${safeSegment(zipStem(surface))}/${rankedVideoName(index + 1, ready.length, post.shortcode, post.username)}`),
         url,
       })
     })
@@ -1019,6 +1044,32 @@ export function onMessage(
     void similarAccounts(username)
       .then((accounts) => sendResponse({ ok: true, accounts }))
       .catch((error: unknown) => sendResponse({ ok: false, error: humanError(error) }))
+    return true
+  }
+  if (message?.type === 'PAUSE_BATCH') {
+    void markPaused('Paused.').then(() => {
+      collectAbort?.abort()
+      patch({ phase: { type: 'idle' }, batch: null })
+      sendResponse({ ok: true })
+    })
+    return true
+  }
+  if (message?.type === 'RESUME_BATCH') {
+    void markResumed().then((job) => {
+      if (!job || job.status === 'done') {
+        sendResponse({ ok: false, error: job ? 'That batch already finished.' : 'No batch to resume.' })
+        return
+      }
+      sendResponse({ ok: true })
+      const handle = job.handles[job.index]
+      const surface = parseSurface(location.href)
+      if (!handle) return
+      if (surface.kind !== 'reels' || surface.username.toLowerCase() !== handle.toLowerCase()) {
+        location.assign(reelsUrl(handle))
+        return
+      }
+      void resumeBatch()
+    })
     return true
   }
   if (message?.type === 'SORT') {

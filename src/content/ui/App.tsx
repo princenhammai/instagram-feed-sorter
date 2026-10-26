@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { FinderDock } from './FinderDock'
 import { InlinePanel } from './inline'
 import {
   cancelDownload,
@@ -36,6 +37,7 @@ import {
   humanError,
 } from '../../lib/format'
 import { headline } from '../../lib/headline'
+import { captionHook } from '../../lib/research'
 import { boltTiers } from '../../lib/outlier'
 import { postsInOrder, searchPosts, sortPosts } from '../../lib/sort'
 import { allowedSorts, parseSurface, similarAllowed } from '../../lib/surface'
@@ -518,6 +520,7 @@ function Workspace({ model }: { model: ReadyModel }) {
         <div className={selecting ? 'grid selecting' : 'grid'}>
           {visible.slice(0, shown).map((post) => {
             const picked = selected.includes(post.id)
+            const hook = captionHook(post.caption)
             return (
               <article key={post.id} className={picked ? 'tile picked' : 'tile'}>
                 <button type="button" className="shot" onClick={() => openPost(post)}>
@@ -538,7 +541,7 @@ function Workspace({ model }: { model: ReadyModel }) {
                     {post.outlierScore != null && <span>⚡ {formatMultiple(post.outlierScore)}</span>}
                   </span>
                 </button>
-                {post.caption && <p className="blurb">{post.caption.split('\n')[0]}</p>}
+                {(hook || post.caption) && <p className="blurb">{hook || post.caption.split('\n')[0]}</p>}
                 {(post.likelyPaid || post.medianScore != null || post.likeRate != null || post.commentRate != null || post.duration != null || post.audio) && (
                   <p className="meta-line">
                     {post.likelyPaid && <span className="paid">Likely paid</span>}
@@ -1000,6 +1003,7 @@ function DetailModal({
               {transcript.error ? <p className="error-text">{transcript.error}</p> : <p>{transcript.text || 'No speech found.'}</p>}
             </div>
           )}
+          {captionHook(post.caption) && <p className="hook">{captionHook(post.caption)}</p>}
           <p className="caption">{post.caption || 'No caption'}</p>
           <p className="note">← → move between posts · Space plays or pauses · Esc closes</p>
         </aside>
@@ -1158,6 +1162,7 @@ function PageTools() {
           )}
         </div>
       )}
+      {(surface.kind === 'posts' || surface.kind === 'reels') && <FinderDock username={surface.username} />}
       {(surface.kind === 'post' || surface.kind === 'stories') && (snap.settings.showDownload || snap.settings.showSave) && (
         <div className="page-tools">
           {snap.settings.showDownload && (

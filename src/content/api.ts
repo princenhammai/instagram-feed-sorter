@@ -1,5 +1,5 @@
 import { callMain } from './bridge'
-import { extractItems, extractStoryItems, extractUserId, extractUsers, extractNext } from '../lib/instagram/extract'
+import { extractItems, extractNext, extractStoryItems, extractUserId, extractUsers } from '../lib/instagram/extract'
 import { shortcodeToId } from '../lib/instagram/ids'
 import { fillMissingMedia } from '../lib/instagram/capture'
 import { normalizeMedia, normalizeStoryItem } from '../lib/instagram/normalize'
@@ -112,6 +112,16 @@ export async function storyPosts(username: string): Promise<Post[]> {
     if (post) posts.push(post)
   }
   return posts
+}
+
+export async function followerCount(username: string): Promise<number | null> {
+  const raw = await callMain({ action: 'followers', username })
+  return typeof raw === 'number' ? raw : null
+}
+
+export async function followingPage(username: string, maxId?: string): Promise<{ accounts: SimilarAccount[]; nextMaxId?: string }> {
+  const raw = await callMain({ action: 'following', username, maxId })
+  return { accounts: extractUsers(raw), nextMaxId: extractNext(raw) }
 }
 
 export async function similarAccounts(username: string): Promise<SimilarAccount[]> {

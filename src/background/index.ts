@@ -18,6 +18,7 @@ import { sapisidToken, sheetUploadBody } from '../lib/sheets'
 import { loadSettings } from '../lib/settings'
 import { offscreenDocumentExists } from '../lib/offscreen'
 import { DEFAULT_TRANSCRIBE_ENDPOINT, type Post } from '../lib/types'
+import { SYNC_KEY, cleanSync, notionPageBody, notionProperties, notionReady, notionSchema, NOTION_VERSION, type SummarySyncRow } from '../lib/sync'
 
 const SHEETS_URL = 'https://docs.google.com/spreadsheets/create'
 const SHEETS_HOME = 'https://docs.google.com/spreadsheets/u/0/'
@@ -464,6 +465,51 @@ async function createGoogleSheet(title: string, csv: string): Promise<{ ok: bool
   }
 }
 
+function syncRows(value: unknown): SummarySyncRow[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null
+      const row = item as SummarySyncRow
+      if (typeof row.account !== 'string' || !row.account) return null
+      return row
+    })
+    .filter((row): row is SummarySyncRow => row != null)
+    .slice(0, 40)
+}
+
+async function notionFetch(token: string, url: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(url, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Notion-Version': NOTION_VERSION,
+      'Content-Type': 'application/json',
+      ...(init.headers as Record<string, string> | undefined),
+    },
+  })
+}
+
+async function syncNotion(rows: SummarySyncRow[], delayMs: number): Promise<{ ok: boolean; synced?: number; error?: string }> {
+  const stored = await chrome.storage.local.get(SYNC_KEY)
+  const settings = cleanSync(stored[SYNC_KEY] as Partial<import('../lib/sync').SyncSettings> | undefined)
+  if (!notionReady(settings)) return { ok: false, error: 'Turn on Notion in the extension options and save a token plus database.' }
+  const database = await notionFetch(settings.notionToken, `https://api.notion.com/v1/databases/${settings.notionDatabaseId}`)
+  if (!database.ok) return { ok: false, error: `Notion returned ${database.status} for that database.` }
+  const schema = notionSchema(await database.json())
+  let synced = 0
+  for (const row of rows) {
+    const response = await notionFetch(settings.notionToken, 'https://api.notion.com/v1/pages', {
+      method: 'POST',
+      body: JSON.stringify(notionPageBody(settings.notionDatabaseId, notionProperties(schema, row))),
+    })
+    if (!response.ok) return { ok: synced > 0, synced, error: `Notion returned ${response.status} after ${synced} rows.` }
+    synced += 1
+    if (synced < rows.length) await new Promise((resolve) => setTimeout(resolve, Math.max(400, delayMs)))
+  }
+  return { ok: true, synced }
+}
+
 async function handle(message: Record<string, unknown>, sender: chrome.runtime.MessageSender): Promise<unknown> {
   if (message.type === 'ENSURE_MAIN') {
     const tabId = sender.tab?.id
@@ -491,6 +537,17 @@ async function handle(message: Record<string, unknown>, sender: chrome.runtime.M
   if (message.type === 'OPEN_SHEETS') {
     await chrome.tabs.create({ url: SHEETS_URL, active: true })
     return { ok: true }
+  }
+
+  if (message.type === 'NOTION_SYNC') {
+    const rows = syncRows(message.rows)
+    if (rows.length === 0) return { ok: false, error: 'There were no summary rows to send.' }
+    const delayMs = typeof message.delayMs === 'number' ? message.delayMs : 1200
+    try {
+      return await syncNotion(rows, delayMs)
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Notion did not accept the rows.' }
+    }
   }
 
   if (message.type === 'CREATE_SHEET') {

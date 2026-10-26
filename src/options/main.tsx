@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Library } from './Library'
+import { Sync } from './Sync'
 import './options.css'
 
 function LibraryApp() {
@@ -11,6 +12,7 @@ function LibraryApp() {
   }, [theme])
   return <div className="app">
     <header className="app-bar"><strong>Instagram Feed Sorter</strong><button type="button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? 'Light' : 'Dark'}</button></header>
+    <Sync />
     <Library />
   </div>
 }
