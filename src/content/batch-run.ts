@@ -1,4 +1,7 @@
-import { followerCount, loadPage } from './api'
+import { followerCount } from './api'
+import { collectGridReels } from './capture-reels'
+import { recordTrace } from './request-log'
+import { accountCaptureMs, allowProgressPaint, gridCaptureSnippet } from '../lib/sort-capture'
 import { getSnap, notify, patch, type BatchProgress } from './store'
 import {
   BATCH_KEY,
@@ -10,12 +13,14 @@ import {
   batchFreshTable,
   batchReelTable,
   batchSummaryTable,
+  accountGapMs,
   createJob,
   currentHandle,
   isBatchJob,
-  isRateLimited,
   mergeSeen,
+  isRateLimited,
   pauseJob,
+  SLOWDOWN_MESSAGE,
   progressLabel,
   reelsUrl,
   resumeJob,
@@ -26,7 +31,6 @@ import {
   type BatchJob,
   type SeenReel,
 } from '../lib/batch'
-import { collectPosts } from '../lib/instagram/collect'
 import { buildWorkbook } from '../lib/xlsx'
 import { SYNC_KEY, cleanSync, notionReady, type SummarySyncRow, type SyncSettings } from '../lib/sync'
 import { downloadName, safeSegment } from '../lib/media-files'
@@ -180,6 +184,15 @@ async function runOnce(): Promise<void> {
   }
   const handle = currentHandle(existing)
   if (!handle) {
+    const empty = existing.accounts.length > 0 && existing.accounts.every((account) => account.reels.length === 0)
+    if (empty) {
+      const note = existing.accounts.find((account) => account.error)?.error || existing.note || 'No reels came back from this profile grid.'
+      await saveJob(pauseJob(existing, note))
+      await saveProgress(null)
+      patch({ phase: { type: 'idle' }, batch: null })
+      notify(`${note} Resume the batch from the research panel.`)
+      return
+    }
     await saveJob({ ...existing, status: 'done', updatedAt: Date.now() })
     await saveProgress(null)
     await exportJob(existing)
@@ -203,44 +216,46 @@ async function runOnce(): Promise<void> {
     batch: progressLabel(existing, 0),
   })
   await saveProgress(progressLabel(existing, 0))
-  if (!(await pause(existing.delayMs, signal))) return
+  if (!(await pause(accountGapMs(), signal))) return
   const latest = await loadJob()
   if (!latest || latest.status !== 'running') return
 
   const known = seenKeySet(await loadSeen())
-  let followers: number | null = null
-  try {
-    followers = await followerCount(handle)
-  } catch (error) {
-    const message = humanError(error)
-    if (isRateLimited(message)) {
-      await settle(applyAccountOutcome(latest, handle, { followers: null, posts: [], thrown: message }, known))
-      return
-    }
-    followers = null
-  }
   if (signal.aborted) return
 
-  try {
-    const result = await collectPosts({
-      limit: latest.reelsPerAccount,
-      delayMs: latest.delayMs,
-      signal,
-      onProgress: (collected) => {
-        const progress = progressLabel(latest, collected)
-        patch({
-          phase: {
-            type: 'collecting',
-            collected,
-            label: `${latest.index + 1}/${latest.handles.length} · @${handle}`,
-            percent: Math.min(100, (collected / latest.reelsPerAccount) * 100),
-            scrolling: false,
-          },
-          batch: progress,
-        })
+  const paintGate = { count: -1, at: 0 }
+  const showCollecting = (collected: number, force = false) => {
+    if (force) {
+      if (paintGate.at !== 0 && paintGate.count === collected) return
+      paintGate.count = collected
+      paintGate.at = Date.now()
+    } else if (!allowProgressPaint(paintGate, collected, Date.now())) return
+    const progress = progressLabel(latest, collected)
+    patch({
+      phase: {
+        type: 'collecting',
+        collected,
+        label: `${latest.index + 1}/${latest.handles.length} · @${handle}`,
+        percent: latest.reelsPerAccount > 0 ? Math.min(100, (collected / latest.reelsPerAccount) * 100) : null,
+        scrolling: true,
       },
-      load: (maxId) => loadPage({ kind: 'reels', username: handle }, maxId),
+      batch: progress,
     })
+  }
+
+  let followers: number | null = null
+  try {
+    const captured = await collectGridReels(handle, latest.reelsPerAccount, signal, (collected) => showCollecting(collected))
+    const posts = captured.posts
+    showCollecting(posts.length, true)
+    const trace = gridCaptureSnippet(posts.length, captured.timedOut, captured.pages, accountCaptureMs(latest.reelsPerAccount))
+    recordTrace({ url: location.href, status: trace.status, snippet: trace.snippet })
+    try {
+      followers = await followerCount(handle)
+    } catch (error) {
+      if (isRateLimited(humanError(error))) throw error
+      followers = null
+    }
     const fresh = await loadJob()
     await settle(
       applyAccountOutcome(
@@ -248,9 +263,8 @@ async function runOnce(): Promise<void> {
         handle,
         {
           followers,
-          posts: result.posts,
-          interrupted: result.interrupted,
-          stopped: result.stopped,
+          posts,
+          thrown: posts.length === 0 && !signal.aborted ? trace.snippet : '',
           aborted: signal.aborted,
         },
         known,
@@ -269,12 +283,9 @@ async function settle(decision: AccountDecision): Promise<void> {
   if (decision.type === 'pause') {
     patch({ phase: { type: 'idle' }, batch: null })
     await saveProgress(null)
-    const calm = decision.message !== 'Paused.'
-    notify(
-      calm
-        ? `${decision.message} Resume the batch from the popup when Instagram has calmed down.`
-        : 'Batch paused. Resume it from the extension popup.',
-    )
+    if (decision.message === 'Paused.') notify('Batch paused. Resume it from the research panel.')
+    else if (decision.message === SLOWDOWN_MESSAGE) notify(SLOWDOWN_MESSAGE)
+    else notify(`${decision.message} Resume the batch from the research panel.`)
     return
   }
   const account = decision.job.accounts[decision.job.accounts.length - 1]

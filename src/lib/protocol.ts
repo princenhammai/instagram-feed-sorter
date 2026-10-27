@@ -12,8 +12,14 @@ export type MainAction =
   | 'stories'
   | 'similar'
   | 'captured'
+  | 'captured-accounts'
+  | 'capture-pulse'
+  | 'search-hits'
   | 'followers'
   | 'following'
+  | 'user-search'
+  | 'reels-search'
+  | 'hashtag'
 
 export interface MainCall {
   action: MainAction

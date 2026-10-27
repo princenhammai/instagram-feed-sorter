@@ -1,0 +1,3 @@
+31076046e8385d3c29ce3cfe6d2100f4756ab8fede806cdc534c66e8b6adab39  instagram-feed-sorter-breakdown-v0.4.6.zip
+8bba5e1f0f40b1b9857a13eff6ad22987b590efef0f41fd358e053c443fd818e  instagram-feed-sorter-v0.4.6.zip
+ebfcaef35f734a1dafb4e6dd4b5dd611e5dad8d9b5de0c1b0620eb39979dc7da  RELEASE_NOTES.md

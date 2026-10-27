@@ -1,23 +1,54 @@
+import { extractItems } from './extract'
+import { normalizeMedia } from './normalize'
 import type { Post } from '../types'
+
+/** Instagram media ids are larger than Number can keep distinct. Quote them before JSON.parse. */
+const LARGE_ID = /("(?:pk|pk_id|id|media_id|fbid|strong_id__)"\s*:\s*)(\d{16,})(?=\s*[,}\]])/g
+
+export function quoteLargeIds(text: string): string {
+  return text.replace(LARGE_ID, '$1"$2"')
+}
+
+function parseJson(body: string): unknown {
+  const parsed = JSON.parse(quoteLargeIds(body)) as unknown
+  if (typeof parsed !== 'string') return parsed
+  const inner = parsed.trim()
+  if (!inner.startsWith('{') && !inner.startsWith('[')) return parsed
+  try {
+    return JSON.parse(quoteLargeIds(inner)) as unknown
+  } catch {
+    return parsed
+  }
+}
 
 export function parseBodies(text: string): unknown[] {
   let body = text.trim()
   if (body.startsWith('for (;;);')) body = body.slice(9).trim()
   if (!body || (body[0] !== '{' && body[0] !== '[')) return []
   try {
-    return [JSON.parse(body) as unknown]
+    return [parseJson(body)]
   } catch {
     const parsed: unknown[] = []
     for (const line of body.split('\n')) {
       const chunk = line.trim()
       if (!chunk) continue
       try {
-        parsed.push(JSON.parse(chunk) as unknown)
+        parsed.push(parseJson(chunk))
       } catch {
         // Streamed responses can end with a partial line.
       }
     }
     return parsed
+  }
+}
+
+/** Keep every distinct shortcode. A numeric pk is not the key, because nearby ids collapse in JSON numbers. */
+export function rememberPosts(into: Map<string, Post>, raw: unknown, fallbackUsername = '', reelsGrid = false): void {
+  for (const item of extractItems(raw, 80)) {
+    const post = normalizeMedia(item, fallbackUsername, reelsGrid)
+    if (!post) continue
+    const key = post.shortcode || post.id
+    into.set(key, mergePost(into.get(key), post))
   }
 }
 
@@ -45,6 +76,7 @@ export function mergePost(previous: Post | undefined, next: Post): Post {
   const merged: Post = { ...previous }
   for (const [key, value] of Object.entries(next) as [keyof Post, Post[keyof Post]][]) {
     if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) continue
+    if (key === 'mediaKind' && previous.mediaKind === 'video' && value === 'image') continue
     ;(merged as unknown as Record<string, unknown>)[key] = value
   }
   return merged

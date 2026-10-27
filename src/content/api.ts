@@ -3,6 +3,7 @@ import { extractItems, extractNext, extractStoryItems, extractUserId, extractUse
 import { shortcodeToId } from '../lib/instagram/ids'
 import { fillMissingMedia } from '../lib/instagram/capture'
 import { normalizeMedia, normalizeStoryItem } from '../lib/instagram/normalize'
+import { accountsInSearch } from '../lib/instagram/search'
 import type { PageBatch } from '../lib/instagram/collect'
 import type { Post, SimilarAccount, SortableSurface } from '../lib/types'
 
@@ -122,6 +123,18 @@ export async function followerCount(username: string): Promise<number | null> {
 export async function followingPage(username: string, maxId?: string): Promise<{ accounts: SimilarAccount[]; nextMaxId?: string }> {
   const raw = await callMain({ action: 'following', username, maxId })
   return { accounts: extractUsers(raw), nextMaxId: extractNext(raw) }
+}
+
+export async function searchUsers(query: string): Promise<SimilarAccount[]> {
+  return accountsInSearch(await callMain({ action: 'user-search', query }))
+}
+
+export async function searchReels(query: string): Promise<SimilarAccount[]> {
+  return accountsInSearch(await callMain({ action: 'reels-search', query }))
+}
+
+export async function searchHashtag(query: string): Promise<SimilarAccount[]> {
+  return accountsInSearch(await callMain({ action: 'hashtag', query }))
 }
 
 export async function similarAccounts(username: string): Promise<SimilarAccount[]> {

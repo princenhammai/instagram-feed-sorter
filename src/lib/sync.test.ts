@@ -36,6 +36,22 @@ describe('sync settings', () => {
     expect(properties.Name).toMatchObject({ title: [{ text: { content: 'ada' } }] })
     expect(properties['Median views']).toEqual({ number: 300 })
     expect(properties['Reels at 3x']).toEqual({ number: 1 })
+    const withProvenance = notionProperties(
+      notionSchema({ properties: { Name: { type: 'title' }, Grade: { type: 'rich_text' }, Provenance: { type: 'rich_text' } } }),
+      {
+        account: 'cara',
+        loaded: 5,
+        medianViews: 12000,
+        topReel: 'https://www.instagram.com/cara/',
+        topViews: null,
+        atLeast3x: 2,
+        followers: 20000,
+        grade: 'STRONG',
+        note: 'followed by ada, bob',
+      },
+    )
+    expect(withProvenance.Grade).toMatchObject({ rich_text: [{ text: { content: 'STRONG' } }] })
+    expect(withProvenance.Provenance).toMatchObject({ rich_text: [{ text: { content: 'followed by ada, bob' } }] })
     expect(notionPageBody('abc', properties).parent).toEqual({ database_id: 'abc' })
   })
 })

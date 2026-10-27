@@ -1,9 +1,20 @@
 import type { SimilarAccount } from '../types'
 
+/** Later Reels pages are sometimes only `{ code }` with no pk. Real shortcodes are 8–15 characters. */
+const CODE_ONLY = /^[A-Za-z0-9_-]{8,15}$/
+
+function mediaCode(raw: object): string {
+  const media = raw as { code?: unknown; shortcode?: unknown; media_code?: unknown }
+  return String(media.code || media.shortcode || media.media_code || '')
+}
+
 export function looksLikeMedia(raw: unknown): boolean {
   if (!raw || typeof raw !== 'object') return false
-  const media = raw as { code?: unknown; shortcode?: unknown; pk?: unknown; id?: unknown }
-  return Boolean((media.code || media.shortcode) && (media.pk || media.id))
+  const media = raw as { pk?: unknown; id?: unknown }
+  const code = mediaCode(raw)
+  const id = media.pk ?? media.id
+  if (code && id != null && String(id) !== '') return true
+  return CODE_ONLY.test(code)
 }
 
 function unwrap(item: unknown): unknown {
@@ -17,64 +28,48 @@ function unwrap(item: unknown): unknown {
   return item
 }
 
-function takeKnown(list: unknown): unknown[] | null {
-  if (!Array.isArray(list) || list.length === 0) return null
-  const media = list.map(unwrap).filter(looksLikeMedia)
-  return media.length > 0 ? media : null
+function mediaIdentity(item: unknown): string {
+  const media = item as { code?: unknown; shortcode?: unknown; pk?: unknown; id?: unknown }
+  const code = String(media.code || media.shortcode || '')
+  if (code) return `code:${code}`
+  const id = String(media.pk ?? media.id ?? '')
+  return id ? `id:${id}` : ''
 }
 
-export function extractItems(data: unknown, maxDepth = 6): unknown[] {
+/**
+ * Every media node in the payload, including later pagination pages.
+ * A short `items` list must not hide the connection edges beside it.
+ * Distinct shortcodes stay distinct even when their numeric pks would collide.
+ */
+export function extractItems(data: unknown, maxDepth = 14): unknown[] {
   if (!data || typeof data !== 'object') return []
-  const root = data as Record<string, unknown>
-  const user = (root.data as { user?: Record<string, unknown> } | undefined)?.user
-  const edges = (user?.edge_owner_to_timeline_media as { edges?: unknown } | undefined)?.edges
-  const direct =
-    takeKnown(root.items) ||
-    takeKnown(root.medias) ||
-    takeKnown(edges) ||
-    null
-  if (direct) return direct
-
-  const grid = root.media_grid as { sections?: unknown[] } | undefined
-  const sections = grid?.sections || (root.sectional_items as unknown[] | undefined)
-  if (Array.isArray(sections)) {
-    const found: unknown[] = []
-    for (const section of sections) {
-      if (!section || typeof section !== 'object') continue
-      const layout = ((section as { layout_content?: unknown }).layout_content ?? section) as Record<string, unknown>
-      const lists = [layout.medias, layout.fill_items]
-      for (const list of lists) {
-        const media = takeKnown(list)
-        if (media) found.push(...media)
-      }
-    }
-    if (found.length > 0) return found
-  }
-
   const found: unknown[] = []
   const seen = new Set<string>()
+  const add = (item: unknown) => {
+    const media = unwrap(item)
+    if (!looksLikeMedia(media)) return
+    const key = mediaIdentity(media)
+    if (!key || seen.has(key)) return
+    seen.add(key)
+    found.push(media)
+  }
   const walk = (node: unknown, depth: number) => {
     if (!node || depth > maxDepth) return
     if (Array.isArray(node)) {
-      const media = takeKnown(node)
-      if (media) {
-        for (const item of media) {
-          const id = String((item as { pk?: unknown; id?: unknown }).pk ?? (item as { id?: unknown }).id)
-          if (seen.has(id)) continue
-          seen.add(id)
-          found.push(item)
-        }
+      for (const item of node) {
+        add(item)
+        walk(item, depth + 1)
       }
-      for (const item of node) walk(item, depth + 1)
       return
     }
     if (typeof node !== 'object') return
+    add(node)
     for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
       if (key === 'carousel_media') continue
       walk(value, depth + 1)
     }
   }
-  walk(root, 0)
+  walk(data, 0)
   return found
 }
 
@@ -195,6 +190,31 @@ function takeList(list: unknown, into: SimilarAccount[], seen: Set<string>): voi
     seen.add(account.username.toLowerCase())
     into.push(account)
   }
+}
+
+function isChromeUserKey(key: string): boolean {
+  return isRelatedKey(key) || /suggest|following|follower|friendship|sidebar/i.test(key)
+}
+
+/** Accounts from a search payload, skipping suggested, following, and chaining lists. */
+export function extractSearchUsers(data: unknown): SimilarAccount[] {
+  if (!data || typeof data !== 'object') return []
+  const accounts: SimilarAccount[] = []
+  const seen = new Set<string>()
+  const walk = (node: unknown, depth: number) => {
+    if (!node || typeof node !== 'object' || depth > 16) return
+    if (Array.isArray(node)) {
+      if (node.some((item) => asAccount(item))) takeList(node, accounts, seen)
+      for (const item of node) walk(item, depth + 1)
+      return
+    }
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if (isChromeUserKey(key)) continue
+      walk(value, depth + 1)
+    }
+  }
+  walk(data, 0)
+  return accounts.slice(0, 40)
 }
 
 export function extractUsers(data: unknown, loose = true): SimilarAccount[] {

@@ -1,6 +1,7 @@
 import { followingPage, similarAccounts } from './api'
 import { kickBatch, queueBatch } from './batch-run'
 import { notify } from './store'
+import { humanError } from '../lib/format'
 import {
   CANDIDATE_KEY,
   DEFAULT_FOLLOWING,
@@ -12,7 +13,7 @@ import {
   visibleHandles,
   type Candidate,
 } from '../lib/candidates'
-import { clampDelay, clampReels, DEFAULT_DELAY_MS, DEFAULT_REELS } from '../lib/batch'
+import { clampDelay, clampReels, DEFAULT_DELAY_MS, DEFAULT_REELS, isRateLimited } from '../lib/batch'
 import { tableToCsv } from '../lib/export'
 import { downloadName, safeSegment } from '../lib/media-files'
 import type { SimilarAccount } from '../lib/types'
@@ -74,6 +75,10 @@ export function openFollowingList(username: string): void {
   if (link instanceof HTMLElement) link.click()
 }
 
+function isAbort(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
+}
+
 export async function collectCandidates(options: {
   username: string
   chain: number
@@ -82,12 +87,19 @@ export async function collectCandidates(options: {
   delayMs: number
   signal: AbortSignal
   onProgress?: (label: string) => void
-}): Promise<{ added: Candidate[]; all: Candidate[] }> {
+}): Promise<{ added: Candidate[]; all: Candidate[]; error?: string }> {
   const delayMs = clampDelay(options.delayMs)
   const chain = clampChain(options.chain)
   const followingCap = clampFollowing(options.followingCap)
   const incoming: Candidate[] = []
   const seen = new Set<string>([options.username.toLowerCase()])
+  const notes: string[] = []
+  const remember = (error: unknown) => {
+    if (isAbort(error)) throw error
+    const message = humanError(error)
+    if (message && !notes.includes(message)) notes.push(message)
+  }
+  const blocked = () => notes.some((note) => isRateLimited(note))
   const take = (accounts: SimilarAccount[], source: string) => {
     for (const account of accounts) {
       const key = account.username.toLowerCase()
@@ -97,57 +109,73 @@ export async function collectCandidates(options: {
     }
   }
 
-  options.onProgress?.(`Suggested for @${options.username}`)
-  const suggested = await similarAccounts(options.username)
-  take(suggested, `suggested from ${options.username}`)
-  const expand = suggested.slice(0, chain)
-  for (const account of expand) {
-    if (options.signal.aborted) break
-    await sleep(delayMs, options.signal)
-    options.onProgress?.(`Suggested from @${account.username}`)
-    const next = await similarAccounts(account.username).catch(() => [])
-    take(next, `suggested from ${account.username} via ${options.username}`)
+  try {
+    options.onProgress?.(`Suggested for @${options.username}`)
+    const suggested = await similarAccounts(options.username)
+    take(suggested, `suggested from ${options.username}`)
+    const expand = blocked() ? [] : suggested.slice(0, chain)
+    for (const account of expand) {
+      if (options.signal.aborted) break
+      await sleep(delayMs, options.signal)
+      options.onProgress?.(`Suggested from @${account.username}`)
+      try {
+        const next = await similarAccounts(account.username)
+        take(next, `suggested from ${account.username} via ${options.username}`)
+      } catch (error) {
+        remember(error)
+      }
+    }
+  } catch (error) {
+    remember(error)
   }
 
-  if (options.scrollRounds > 0) {
-    options.onProgress?.('Reading the open following list')
-    openFollowingList(options.username)
-    await sleep(Math.min(delayMs, 800), options.signal).catch(() => undefined)
-    const visible = await scrollFollowingDialog(options.scrollRounds, delayMs, options.signal).catch(() => readVisibleHandles())
-    take(
-      visible.map((username) => ({
-        id: username,
-        username,
-        fullName: '',
-        verified: false,
-        url: `https://www.instagram.com/${username}/`,
-        followers: null,
-        avatarUrl: null,
-        isPrivate: false,
-        category: null,
-        biography: null,
-      })),
-      `following of ${options.username}`,
-    )
+  if (options.scrollRounds > 0 && !options.signal.aborted && !blocked()) {
+    try {
+      options.onProgress?.('Reading the open following list')
+      openFollowingList(options.username)
+      await sleep(Math.min(delayMs, 800), options.signal).catch(() => undefined)
+      const visible = await scrollFollowingDialog(options.scrollRounds, delayMs, options.signal).catch(() => readVisibleHandles())
+      take(
+        visible.map((username) => ({
+          id: username,
+          username,
+          fullName: '',
+          verified: false,
+          url: `https://www.instagram.com/${username}/`,
+          followers: null,
+          avatarUrl: null,
+          isPrivate: false,
+          category: null,
+          biography: null,
+        })),
+        `following of ${options.username}`,
+      )
+    } catch (error) {
+      remember(error)
+    }
   }
 
-  if (followingCap > 0 && !options.signal.aborted) {
+  if (followingCap > 0 && !options.signal.aborted && !blocked()) {
     let maxId: string | undefined
     let loaded = 0
-    while (loaded < followingCap && !options.signal.aborted) {
-      options.onProgress?.(`Following list ${loaded} of ${followingCap}`)
-      await sleep(delayMs, options.signal)
-      const page = await followingPage(options.username, maxId)
-      take(page.accounts, `following of ${options.username}`)
-      loaded += page.accounts.length
-      if (!page.nextMaxId || page.nextMaxId === maxId || page.accounts.length === 0) break
-      maxId = page.nextMaxId
+    try {
+      while (loaded < followingCap && !options.signal.aborted) {
+        options.onProgress?.(`Following list ${loaded} of ${followingCap}`)
+        await sleep(delayMs, options.signal)
+        const page = await followingPage(options.username, maxId)
+        take(page.accounts, `following of ${options.username}`)
+        loaded += page.accounts.length
+        if (!page.nextMaxId || page.nextMaxId === maxId || page.accounts.length === 0) break
+        maxId = page.nextMaxId
+      }
+    } catch (error) {
+      remember(error)
     }
   }
 
   const merged = mergeCandidates(await loadCandidates(), incoming)
   await saveCandidates(merged.all)
-  return merged
+  return { ...merged, error: notes.join(' ') || undefined }
 }
 
 export async function exportCandidates(candidates: Candidate[]): Promise<string> {

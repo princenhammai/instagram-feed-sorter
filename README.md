@@ -24,29 +24,34 @@ The release also includes `instagram-feed-sorter-breakdown-v<VERSION>.zip` (an e
 
 Each tool uses the Instagram session already in this browser. None of them like, follow, comment, or message.
 
-### Batch runner
+### Research panel
 
-1. Open Instagram and sign in. Leave that tab open.
-2. Open the extension popup and paste handles, one per line or as profile URLs.
-3. Set Reels per account (up to 200) and the delay between requests (400–10000 ms, default 1200).
-4. Choose **Run batch**. Use **Pause** and **Resume** in the same popup. Resume continues on the account that was in progress.
-5. When it finishes, your downloads folder gets one CSV, one Excel file (Reels, New reels, Summary), and an HTML chart.
+1. Open Instagram and sign in.
+2. Choose **Research** on the page, or **Open research** in the extension popup.
+3. Paste seed handles. For Snowball, add keywords too. Choose **Batch** or **Snowball**, then **Run**.
+4. Progress stays in the panel. **Pause** and **Resume** are on that same panel. A reload continues the saved run. Errors stay on the panel.
+5. The panel scrolls. Snowball lists each account as STRONG, MAYBE, or WEAK with its depth. The reels table sorts by × median (the default), engagement, or views. Paid reels are hidden until you check **Show paid**.
+6. **Export** saves an Excel file of the rows you are looking at. **Download top 10** saves those videos. **Sync** sends them to Google Sheets or Notion when that option is already on.
+
+Batch and snowball each have a Reels-per-account field (100 and 30 by default). That number stays where you left it after Run reloads the tab, and the field only accepts digits. Each account keeps the reels from the first response, scrolls the last reel tile into view and the window to the bottom, and waits up to 2.5 seconds for the next page (longer while a request is still in flight). It stops at the target, after ten quiet rounds, or at 90 seconds or 3 seconds per target reel, whichever is longer, and never waits more than 5 minutes. The request log includes how many pages were fetched. A later page that only carries a shortcode still counts on the Reels tab, with no extra API call. A stuck account is skipped with that reason, and the batch moves on. A batch that finishes with no reels stays paused and does not export an empty file. HTTP 429 or a body with `feedback_required` stops the run, saves it, and shows “Instagram asked us to slow down — wait at least a few hours”. Resume stays off for four hours. The request log on the panel shows the status, URL, and response snippet. Snowball shows Max to expand (default 20) and Max depth (default 2). Every seed and keyword account is scored first. Then it expands that many STRONG accounts and keeps going until max depth, unless the daily cap of scored accounts is hit or a finished depth is under 20% STRONG. A keyword opens `https://www.instagram.com/explore/search/keyword/?q=` and reads accounts from the search results, up to 10 keywords and 15 accounts each. Sidebar, suggested, and following accounts are left out. The handles are listed on the panel and in the request log, then join round 0 with provenance `search: <keyword>`. Snowball does not call `web_profile_info` for a seed or a scored account. Expansion uses the id, followers, and suggested accounts saved from that profile's Reels page, then the following list or chaining only when that id was already saved. A pause or a rate limit writes the same CSV and Excel file as a finished run, including grade, depth, and reels. Those other snowball thresholds stay fixed for this pass.
+
+Handles and keywords are typed in the on-page panel. Keystrokes stay in that panel, so Instagram shortcuts do not take focus. The popup only opens the panel and can resume a paused run. Find accounts stays on the right side of a profile or Reels tab.
 
 ### Account finder
 
 1. Open a profile while signed in.
-2. In the Sorter overlay, choose **Find accounts**.
-3. Set how far to walk suggestions and how many following accounts to read. The same delay applies between requests.
-4. Choose **Collect**. New handles are stored on this browser and labeled with a source such as `suggested from ada`.
-5. Export the rows, or send them into the batch runner.
+2. Choose **Find accounts** on the right side of the page. The search starts immediately and the panel stays open.
+3. Suggested accounts and the following list appear in that panel. An empty result and any Instagram error, including the HTTP status, stay on the panel.
+4. Set how far to walk suggestions and how many following accounts to read, then choose **Collect** to run again. The same delay applies between requests.
+5. Export the new rows, or send them into the batch runner.
 
 ### Sheets and Notion
 
 1. Open the extension options page. Both switches start off.
 2. For a Google Sheet, turn the sheet switch on. The sheet is created with the Google account already signed in to this browser when a batch finishes.
 3. For Notion, paste an integration token and a database URL, then turn Notion on. The token stays in extension storage.
-4. In that database, use a title for the account and, if you want the numbers filled in, number properties named `Median views`, `Reels loaded`, `Reels at 3x`, and `Followers`, plus a URL property `Top reel`.
-5. Run a batch. One summary row is added per account, spaced by the batch delay.
+4. In that database, use a title for the account and, if you want the numbers filled in, number properties named `Median views`, `Reels loaded`, `Reels at 3x`, and `Followers`, plus a URL property `Top reel`. Snowball also fills rich text properties named `Grade` and `Provenance` when those columns exist.
+5. Run a batch or a snowball. One summary row is added per account, spaced by the delay. Notion receives at most 40 rows; a snowball sends STRONG accounts first.
 
 ### Download top N
 
@@ -77,18 +82,35 @@ The extension is portable across desktop operating systems. GitHub hosting does 
 - Export Google Sheets, Excel, CSV, JSON or clipboard data. CSV, JSON and Excel files are written into the downloads folder, and a failed save is reported instead of a success message.
 - Download the top videos in the current sort as `rank01_<handle>_<shortcode>.mp4` with no save dialog per file. Download other media and keep posts in local folders with the Library.
 - Batch a pasted list of handles into one CSV and one Excel file, with a per-account summary sheet. Optional Google Sheet or Notion sync is off until you turn it on. Find suggested and following accounts from a profile and send them to that batch.
+- One research panel on the Instagram page: paste seeds, run a batch or snowball, watch progress, then sort the results by × median, engagement, or views. Paid reels are hidden until you show them. Export, Download top 10, and Sync are one click each. Resume stays on the panel.
 - Optional video transcription using your own Whisper-compatible provider/key.
 - View related accounts suggested by Instagram from the Sorter overlay.
 
 ## Batch runner
 
-The short version is under Quickstart. On an Instagram tab, open the extension popup and paste handles (one per line, or profile URLs). Set how many Reels to load per account (up to 200) and the delay between Instagram requests (400–10000 ms, default 1200). Run batch.
+The short version is under Quickstart. The research panel's Batch mode defaults to 100 Reels per account and a 1200 ms delay. The same field accepts up to 200 Reels.
 
-The tab visits each profile's Reels page, reads up to N Reels, and scores that account on its own median. The export is one CSV of every Reel, one Excel workbook, and an HTML summary chart. The workbook has a Reels sheet, a New reels sheet, and a Summary sheet (reels loaded, median views, top Reel, how many Reels are at 3× the account median, and how many were already seen). Each Reel row includes the caption hook: the first line that still says something after hashtags and @mentions are removed. Pause keeps the finished accounts. Resume continues at the same handle. A rate limit, including Instagram's "please wait a few minutes" response, pauses the job instead of advancing. Shortcodes already exported on this browser are marked Seen before and left off the New reels sheet, so a later run does not treat them as new discoveries. The HTML file charts median views and 3× Reels per account.
+The tab visits each profile's Reels page, keeps reels from the first response, then scrolls the last reel tile into view and the window to the bottom. Each round waits up to 2.5 seconds for a new page and stays open while a request is in flight. It stops at the target, after ten quiet rounds, or at the scaled time limit (90 seconds, or 3 seconds per target reel, and at most 5 minutes). The request log records the reel count and the pages fetched. Later pages that are only a shortcode still count as reels for the open profile. The reader does not call clips or feed APIs to fill the gap. A timed-out account is skipped and the reason is written in the request log. Direct clips and feed calls that return HTML are not the loader. If every account comes back with zero reels, the batch stays paused and does not write the export. The export, when the grid did return reels, is one CSV of every Reel, one Excel workbook, and an HTML summary chart. The workbook has a Reels sheet, a New reels sheet, and a Summary sheet (reels loaded, median views, top Reel, how many Reels are at 3× the account median, and how many were already seen). Each Reel row includes the caption hook: the first line that still says something after hashtags and @mentions are removed. Pause keeps the finished accounts. Resume continues at the same handle. A paused batch that collected no reels starts again from the first handle. Each account waits a random 8–20 seconds before its grid is read. The extension does not call `web_profile_info`. The id and follower count come from the open page, and they are kept for later expansion. The request log lists each status, URL, and response snippet. A phrase such as "please wait" or "try again later", or the digits 429 inside a longer payload, does not pause the job. HTTP 429 and `feedback_required` stop the run immediately, save it, and show “Instagram asked us to slow down — wait at least a few hours”. Resume stays off for four hours, and the job stays on that account. Shortcodes already exported on this browser are marked Seen before and left off the New reels sheet, so a later run does not treat them as new discoveries. The HTML file charts median views and 3× Reels per account.
+
+## Snowball research
+
+The short version is under Quickstart. The panel uses these defaults and does not expose the full threshold form. Paste 10–20 handles, and optionally up to 10 keywords. Max to expand defaults to 20 and Max depth defaults to 2; both are on the Snowball panel. Max to expand is how many STRONG accounts are opened to discover more. It does not stop the crawl before that expansion. The crawl opens each keyword on `https://www.instagram.com/explore/search/keyword/?q=` and reads accounts from that page's result column. A GraphQL response is used only when the request itself carries the keyword, and suggested, following, and chaining lists inside it are ignored. The handles are shown on the panel and in the request log. It keeps up to 15 accounts per keyword. It waits a random 8–20 seconds between accounts, and does not follow, like, comment, or message. Accounts already in the seed list are not added again. A new account is queued at depth 0 with provenance `search: barber`. The same account found for a second keyword is still one candidate, with provenance `search: barber; search: fade`. The crawl then scores one account at a time with that grid capture, until the reel target is met, ten quiet rounds pass, or the scaled time limit is reached (default 30 reels, up to 100). It then classifies the account:
+
+- **STRONG** when unpaid Reels at or above 3× that account's median views meet your count (default 2) and the median itself meets your floor (default 10,000). Leave the engagement percent blank to skip that check. A value of `1` requires a median engagement rate of at least 1%.
+- **MAYBE** when the account misses STRONG but still has at least one unpaid 3× Reel and a median of at least 1,000 views.
+- **WEAK** otherwise. An account that returns no Reels is recorded as an error and is not expanded.
+
+A Reel with `#ad`, `#sponsored`, `#paidpartnership`, or Instagram's paid-partnership flag is left out of the 3× count, as is a Reel whose like rate is under 10% of the set's median while its views are at least that median.
+
+Only STRONG accounts are expanded. Suggested accounts already captured on that profile's Reels page are reused after the tab has moved on. The following list and chaining run only when that page saved an id. Snowball never calls `web_profile_info` for a seed or a scored account. The crawl reads up to 40 following accounts and up to 20 suggested accounts, waits at least 400 ms between requests (default 1200), and does not follow, like, comment, or message. Handles already seeded, queued, or scored are not added again. A candidate's priority is how many distinct STRONG accounts follow or suggest it. Optional minimum and maximum follower counts skip candidates whose count is known and outside the range; a missing count is kept.
+
+Depth 0 is the seed list plus the keyword accounts, and those accounts are scored before expansion starts. Each expansion adds the next depth, up to Max to expand STRONG accounts (default 20). The crawl stops when that many STRONG accounts have been expanded and nothing further is queued, when max depth is reached (default 2), or when a finished depth is under the STRONG ratio (default 20%). It also pauses at the daily cap (default 25 scored accounts per UTC day) and continues when you resume on a later UTC day. HTTP 429 or `feedback_required` stops the whole crawl, writes the same CSV and Excel file as a finished run, and blocks Resume for four hours. That file includes every scored account's grade and depth, plus a Reels sheet. Accounts already read stay on the panel with their grade and depth. A pause with no scored accounts writes nothing. Other failures are listed in the request log and the crawl continues. Seen handles, the queue, scores, sources, keywords, and depth are stored in `chrome.storage.local`, so a reload or crash resumes the same crawl.
+
+The export is a CSV and an Excel workbook with an Accounts sheet, a Reels sheet, and a Queue sheet. A paused or rate-limited run writes that same workbook when at least one account has been scored. Provenance reads `seed`, `search: barber`, `followed by A, B`, or `suggested by A`. If Sheets or Notion is already enabled, the same finish step can create a Sheet or send summary rows. Notion maps `Grade` and `Provenance` only when the database has rich text properties with those names.
 
 ## Account finder
 
-The short version is under Quickstart. On a profile, use **Find accounts**. It reads Suggested for you, optionally walks a short chain of those suggestions, scrolls an open following dialog, and pages the following list up to the cap you set. The same delay applies between requests. New handles are stored on this browser, deduped, and labeled with a source such as `suggested from ada`. Export the new rows, or send them straight into the batch runner. This does not follow, like, or message anyone.
+On a profile or Reels tab, **Find accounts** sits on the right. Choosing it opens the panel and starts a read of suggested accounts and the following list. Candidates stay listed in the panel. If Instagram returns nothing, or a request fails, that outcome stays in the panel with the HTTP status and response text. A failure on the following list does not discard suggestions that already came back. New handles are stored on this browser, deduped, and labeled with a source such as `suggested from ada`. Export the new rows, or send them straight into the batch runner. This does not follow, like, or message anyone. The snowball threshold form stays off the panel; snowball uses the fixed defaults above.
 
 ## Sheets and Notion
 

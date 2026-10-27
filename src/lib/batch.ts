@@ -8,6 +8,21 @@ export const BATCH_PROGRESS_KEY = 'ifs-batch-progress'
 export const DEFAULT_DELAY_MS = 1200
 export const MIN_DELAY_MS = 400
 export const MAX_DELAY_MS = 10_000
+/** Wait this long between accounts before reading the next Reels grid. */
+export const ACCOUNT_GAP_MIN_MS = 8_000
+export const ACCOUNT_GAP_MAX_MS = 20_000
+export const SLOWDOWN_MESSAGE = 'Instagram asked us to slow down — wait at least a few hours'
+export const SLOWDOWN_MS = 4 * 60 * 60 * 1000
+
+/** Random gap from 8s through 20s, inclusive when `random` can return values in [0, 1). */
+export function accountGapMs(random: () => number = Math.random): number {
+  const span = ACCOUNT_GAP_MAX_MS - ACCOUNT_GAP_MIN_MS
+  return ACCOUNT_GAP_MIN_MS + Math.floor(random() * (span + 1))
+}
+
+export function cooldownActive(until: number | undefined, now = Date.now()): boolean {
+  return typeof until === 'number' && Number.isFinite(until) && until > now
+}
 export const DEFAULT_REELS = 100
 export const MAX_REELS = 200
 export const MAX_HANDLES = 40
@@ -50,6 +65,8 @@ export interface BatchJob {
   accounts: AccountResult[]
   status: 'running' | 'paused' | 'done'
   note?: string
+  /** Resume stays disabled until this time after Instagram asks us to slow down. */
+  cooldownUntil?: number
   updatedAt: number
 }
 
@@ -177,18 +194,34 @@ export function pauseJob(job: BatchJob, note?: string, now = Date.now()): BatchJ
   return { ...job, status: 'paused', note: note || job.note, updatedAt: now }
 }
 
+export function pauseForSlowdown(job: BatchJob, now = Date.now()): BatchJob {
+  return { ...job, status: 'paused', note: SLOWDOWN_MESSAGE, cooldownUntil: now + SLOWDOWN_MS, updatedAt: now }
+}
+
 export function resumeJob(job: BatchJob, now = Date.now()): BatchJob {
-  if (job.index >= job.handles.length) return { ...job, status: 'done', updatedAt: now }
-  return { ...job, status: 'running', note: undefined, updatedAt: now }
+  if (cooldownActive(job.cooldownUntil, now)) {
+    return { ...job, status: 'paused', note: SLOWDOWN_MESSAGE, updatedAt: now }
+  }
+  const ready = job.cooldownUntil ? { ...job, cooldownUntil: undefined } : job
+  if (ready.index >= ready.handles.length) {
+    if (ready.accounts.length > 0 && ready.accounts.every((account) => account.reels.length === 0)) {
+      return { ...ready, status: 'running', index: 0, accounts: [], note: undefined, updatedAt: now }
+    }
+    return { ...ready, status: 'done', updatedAt: now }
+  }
+  return { ...ready, status: 'running', note: undefined, updatedAt: now }
 }
 
 export function reelKey(username: string, shortcode: string): string {
   return `${username.trim().toLowerCase()}:${shortcode.trim()}`
 }
 
-export function isRateLimited(message: string | null | undefined): boolean {
+const REAL_LIMIT = /\bHTTP\s+429\b|\bfeedback_required\b/i
+
+export function isRateLimited(message: string | null | undefined, status?: number): boolean {
+  if (status === 429) return true
   if (!message) return false
-  return /rate limit|429|please wait a few minutes|feedback_required|try again later/i.test(message)
+  return REAL_LIMIT.test(message)
 }
 
 export function compactReel(post: Post, seenBefore = false): StoredReel {
@@ -371,6 +404,10 @@ export function seenFromReels(reels: StoredReel[], now = Date.now()): SeenReel[]
     .map((reel) => ({ username: reel.username, shortcode: reel.shortcode, seenAt: now }))
 }
 
+function postsFrom(snapshot: AccountSnapshot): Post[] {
+  return uniquePosts(snapshot.posts)
+}
+
 export function applyAccountOutcome(
   job: BatchJob,
   handle: string,
@@ -383,39 +420,25 @@ export function applyAccountOutcome(
   }
   const thrown = snapshot.thrown?.trim() || ''
   if (thrown && isRateLimited(thrown)) {
-    return { type: 'pause', job: pauseJob(job, thrown, now), message: thrown }
+    return { type: 'pause', job: pauseForSlowdown(job, now), message: SLOWDOWN_MESSAGE }
   }
   const interrupted = snapshot.interrupted?.trim() || ''
   if (interrupted && isRateLimited(interrupted)) {
-    return { type: 'pause', job: pauseJob(job, interrupted, now), message: interrupted }
+    return { type: 'pause', job: pauseForSlowdown(job, now), message: SLOWDOWN_MESSAGE }
   }
-  if (thrown) {
-    return {
-      type: 'saved',
-      job: withAccount(
-        job,
-        { username: handle, status: 'error', error: thrown, followers: snapshot.followers, reels: [] },
-        now,
-      ),
+  if (thrown || postsFrom(snapshot).length === 0) {
+    const message = thrown || interrupted || 'No reels came back from this profile grid.'
+    const next = withAccount(
+      job,
+      { username: handle, status: 'error', error: message, followers: snapshot.followers, reels: [] },
+      now,
+    )
+    if (next.status === 'done' && next.accounts.every((account) => account.reels.length === 0)) {
+      return { type: 'pause', job: pauseJob(next, message, now), message }
     }
+    return { type: 'saved', job: next }
   }
-  const posts = uniquePosts(snapshot.posts)
-  if (posts.length === 0) {
-    return {
-      type: 'saved',
-      job: withAccount(
-        job,
-        {
-          username: handle,
-          status: 'error',
-          error: interrupted || 'No reels came back. The account may be private.',
-          followers: snapshot.followers,
-          reels: [],
-        },
-        now,
-      ),
-    }
-  }
+  const posts = postsFrom(snapshot)
   return {
     type: 'saved',
     job: withAccount(

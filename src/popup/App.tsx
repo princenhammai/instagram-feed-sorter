@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { allowedSorts, countAllAllowed, dateFilterAllowed, defaultSort, isSortable, parseSurface, sortBlockReason, surfaceTitle } from '../lib/surface'
 import { rangeError } from '../lib/range'
 import { loadSettings, saveSettings } from '../lib/settings'
-import { BATCH_KEY, BATCH_PROGRESS_KEY, clampDelay, clampReels, createJob, isBatchJob, parseHandles, reelsUrl, DEFAULT_DELAY_MS, DEFAULT_REELS, type BatchJob, type BatchProgress } from '../lib/batch'
+import { BATCH_KEY, BATCH_PROGRESS_KEY, isBatchJob, type BatchJob, type BatchProgress } from '../lib/batch'
+import { RESEARCH_OPEN_KEY } from '../lib/research-table'
+import { SNOWBALL_KEY, SNOWBALL_PROGRESS_KEY, isSnowballJob, progressLabel, type SnowballJob } from '../lib/snowball'
 import { DEFAULT_SETTINGS, DEFAULT_TRANSCRIBE_ENDPOINT, type DatePreset, type RangeChoice, type Settings, type SortKey, type Surface } from '../lib/types'
 
 const SORTS: { key: SortKey; label: string; icon: string; hint?: string }[] = [
@@ -76,11 +78,10 @@ export function App() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState<SortKey | 'download' | null>(null)
   const [bridgeOn, setBridgeOn] = useState(false)
-  const [handlesText, setHandlesText] = useState('')
-  const [batchReels, setBatchReels] = useState(String(DEFAULT_REELS))
-  const [batchDelay, setBatchDelay] = useState(String(DEFAULT_DELAY_MS))
   const [batchJob, setBatchJob] = useState<BatchJob | null>(null)
   const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null)
+  const [snowJob, setSnowJob] = useState<SnowballJob | null>(null)
+  const [snowProgress, setSnowProgress] = useState('')
 
   useEffect(() => {
     void (async () => {
@@ -89,15 +90,19 @@ export function App() {
       setSettings(await loadSettings())
       const bridge = await chrome.runtime.sendMessage({ type: 'BRIDGE_STATUS' }).catch(() => null)
       setBridgeOn(Boolean(bridge?.connected))
-      const stored = await chrome.storage.local.get([BATCH_KEY, BATCH_PROGRESS_KEY])
+      const stored = await chrome.storage.local.get([BATCH_KEY, BATCH_PROGRESS_KEY, SNOWBALL_KEY, SNOWBALL_PROGRESS_KEY])
       setBatchJob(isBatchJob(stored[BATCH_KEY]) ? stored[BATCH_KEY] : null)
       setBatchProgress((stored[BATCH_PROGRESS_KEY] as BatchProgress | undefined) ?? null)
+      setSnowJob(isSnowballJob(stored[SNOWBALL_KEY]) ? stored[SNOWBALL_KEY] : null)
+      setSnowProgress(typeof stored[SNOWBALL_PROGRESS_KEY] === 'string' ? stored[SNOWBALL_PROGRESS_KEY] : '')
       setReady(true)
     })()
     const onChanged = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
       if (area !== 'local') return
       if (changes[BATCH_KEY]) setBatchJob(isBatchJob(changes[BATCH_KEY].newValue) ? changes[BATCH_KEY].newValue as BatchJob : null)
       if (changes[BATCH_PROGRESS_KEY]) setBatchProgress((changes[BATCH_PROGRESS_KEY].newValue as BatchProgress | undefined) ?? null)
+      if (changes[SNOWBALL_KEY]) setSnowJob(isSnowballJob(changes[SNOWBALL_KEY].newValue) ? changes[SNOWBALL_KEY].newValue as SnowballJob : null)
+      if (changes[SNOWBALL_PROGRESS_KEY]) setSnowProgress(typeof changes[SNOWBALL_PROGRESS_KEY].newValue === 'string' ? changes[SNOWBALL_PROGRESS_KEY].newValue : '')
     }
     chrome.storage.onChanged.addListener(onChanged)
     return () => chrome.storage.onChanged.removeListener(onChanged)
@@ -176,48 +181,49 @@ export function App() {
     }
   }
 
-  async function openBatch(url: string) {
+  async function instagramTab(): Promise<chrome.tabs.Tab | null> {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-    if (tab?.id && tab.url?.includes('instagram.com')) {
-      const same = tab.url.split('?')[0]?.replace(/\/+$/, '') === url.replace(/\/+$/, '')
-      if (same) await chrome.tabs.sendMessage(tab.id, { type: 'RESUME_BATCH' }).catch(() => undefined)
-      else await chrome.tabs.update(tab.id, { url })
-    } else {
-      await chrome.tabs.create({ url })
+    if (!tab?.id || !tab.url?.includes('instagram.com')) return null
+    return tab
+  }
+
+  async function openResearch() {
+    setError('')
+    const tab = await instagramTab()
+    if (!tab?.id) {
+      setError('Open an Instagram tab first. The research panel lives on that page.')
+      return
+    }
+    await chrome.storage.local.set({ [RESEARCH_OPEN_KEY]: true })
+    const response = await chrome.tabs.sendMessage(tab.id, { type: 'SHOW_RESEARCH' }).catch(() => null)
+    if (!response?.ok) {
+      setError('This Instagram tab has not loaded the extension yet. Refresh it, then open research again.')
+      return
     }
     window.close()
   }
 
-  async function runBatch() {
+  async function resumeResearch() {
     setError('')
-    const handles = parseHandles(handlesText)
-    if (handles.length === 0) {
-      setError('Paste at least one Instagram handle.')
+    const tab = await instagramTab()
+    if (!tab?.id) {
+      setError('Open an Instagram tab first, then resume.')
       return
     }
-    const job = createJob(handles, clampReels(Number(batchReels)), clampDelay(Number(batchDelay)))
-    await chrome.storage.local.set({ [BATCH_KEY]: job })
-    await openBatch(reelsUrl(handles[0]))
-  }
-
-  async function resumeBatchRun() {
-    setError('')
-    const stored = await chrome.storage.local.get(BATCH_KEY)
-    const job = isBatchJob(stored[BATCH_KEY]) ? stored[BATCH_KEY] : null
-    if (!job || job.index >= job.handles.length) {
-      setError('No paused batch to resume.')
+    const snowPaused = snowJob?.status === 'paused'
+    const batchPaused = batchJob?.status === 'paused'
+    if (!snowPaused && !batchPaused) {
+      setError('No paused research run to resume.')
       return
     }
-    await openBatch(reelsUrl(job.handles[job.index] || job.handles[0]))
-  }
-
-  async function pauseBatchRun() {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-    if (tab?.id) await chrome.tabs.sendMessage(tab.id, { type: 'PAUSE_BATCH' }).catch(() => undefined)
-    const stored = await chrome.storage.local.get(BATCH_KEY)
-    if (isBatchJob(stored[BATCH_KEY]) && stored[BATCH_KEY].status === 'running') {
-      await chrome.storage.local.set({ [BATCH_KEY]: { ...stored[BATCH_KEY], status: 'paused', updatedAt: Date.now() } })
+    const useSnow = snowPaused && (!batchPaused || (snowJob?.updatedAt ?? 0) >= (batchJob?.updatedAt ?? 0))
+    await chrome.storage.local.set({ [RESEARCH_OPEN_KEY]: true })
+    const response = await chrome.tabs.sendMessage(tab.id, { type: useSnow ? 'RESUME_SNOWBALL' : 'RESUME_BATCH' }).catch(() => null)
+    if (!response?.ok) {
+      setError('This Instagram tab has not loaded the extension yet. Refresh it, then resume.')
+      return
     }
+    window.close()
   }
 
   async function downloadHere() {
@@ -316,58 +322,26 @@ export function App() {
         </section>
       )}
 
+      {error && <p className="error" role="alert">{error}</p>}
+
       <section className="card">
-        <p className="label">Batch reels</p>
-        <textarea
-          className="field"
-          value={handlesText}
-          placeholder={'@ada\nhttps://www.instagram.com/bob/'}
-          aria-label="Instagram handles, one per line"
-          onChange={(event) => setHandlesText(event.target.value)}
-        />
+        <p className="label">Research</p>
+        <p className="muted small">Seed handles, run a batch or snowball, and review the results table on the Instagram page. Paid reels stay hidden until you show them.</p>
         <div className="row">
-          <input
-            className="field"
-            type="number"
-            min={1}
-            max={200}
-            value={batchReels}
-            aria-label="Reels per account"
-            onChange={(event) => setBatchReels(event.target.value)}
-          />
-          <input
-            className="field"
-            type="number"
-            min={400}
-            max={10000}
-            step={100}
-            value={batchDelay}
-            aria-label="Delay between Instagram requests in milliseconds"
-            onChange={(event) => setBatchDelay(event.target.value)}
-          />
-        </div>
-        <p className="muted small">Reels per account, then milliseconds between requests. The tab visits each Reels page and can be resumed if it stops.</p>
-        <div className="row">
-          <button type="button" className="primary" disabled={busy != null} onClick={() => void runBatch()}>
-            Run batch
+          <button type="button" className="primary" onClick={() => void openResearch()}>
+            Open research
           </button>
-          {batchJob && batchJob.status !== 'done' && (
-            <button type="button" disabled={busy != null} onClick={() => void resumeBatchRun()}>
+          {(batchJob?.status === 'paused' || snowJob?.status === 'paused') && (
+            <button type="button" onClick={() => void resumeResearch()}>
               Resume
             </button>
           )}
-          {batchJob?.status === 'running' && (
-            <button type="button" onClick={() => void pauseBatchRun()}>
-              Pause
-            </button>
-          )}
         </div>
-        {batchJob && (
+        {(batchJob || snowJob) && (
           <p className="muted small">
-            {batchProgress
-              ? `${batchProgress.index}/${batchProgress.total} @${batchProgress.handle} · ${batchProgress.collected} reels`
-              : `${batchJob.status} · ${batchJob.index}/${batchJob.handles.length}`}
-            {batchJob.note ? ` · ${batchJob.note}` : ''}
+            {batchJob ? `Batch ${batchJob.status}${batchProgress ? ` · ${batchProgress.index}/${batchProgress.total} @${batchProgress.handle}` : ` · ${batchJob.index}/${batchJob.handles.length}`}` : ''}
+            {batchJob && snowJob ? ' · ' : ''}
+            {snowJob ? `Snowball ${snowJob.status}${snowProgress ? ` · ${snowProgress}` : ` · ${progressLabel(snowJob)}`}` : ''}
           </p>
         )}
       </section>
@@ -493,7 +467,6 @@ export function App() {
         </section>
       )}
 
-      {error && <p className="error">{error}</p>}
 
       <p className="muted small">
         {bridgeOn

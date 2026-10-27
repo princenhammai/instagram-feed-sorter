@@ -33,7 +33,10 @@ button { cursor: pointer; }
   color: var(--accent-ink);
   font-size: 14px;
 }
-.row { display: flex; gap: 6px; align-items: center; }
+.row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+details.fold { margin: 6px 0; }
+details.fold summary { cursor: pointer; color: var(--muted); }
+details.fold .row { margin-top: 6px; }
 .row .field { width: auto; flex: 1; min-width: 0; }
 .icon { border: 0; background: var(--raised); color: var(--muted); width: 28px; height: 28px; border-radius: 8px; }
 .icon:hover { color: var(--ink); }

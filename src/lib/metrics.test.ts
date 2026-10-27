@@ -33,8 +33,11 @@ describe('parsing and research metrics', () => {
     const medianLikeRate = 0.04
     const disclosed = samplePost({ id: 'ad', views: 100, likes: 4, caption: 'hello #sponsored' })
     expect(paidSignalsFor(disclosed, medianLikeRate, medianViews)).toEqual(['#sponsored'])
-    const partner = samplePost({ id: 'partner', views: 100, likes: 4, paidPartnership: true, caption: 'hello' })
-    expect(paidSignalsFor(partner, medianLikeRate, medianViews)).toContain('paid partnership')
+    const partner = samplePost({ id: 'partner', views: 100, likes: 4, paidPartnership: true, caption: 'Care that fits. #ad' })
+    expect(paidSignalsFor(partner, medianLikeRate, medianViews)).toEqual(expect.arrayContaining(['#ad', 'paid partnership']))
+    const flagged = withResearch([partner])
+    expect(flagged[0]?.likelyPaid).toBe(true)
+    expect(flagged[0]?.paidSignals).toEqual(expect.arrayContaining(['#ad', 'paid partnership']))
     const quiet = samplePost({ id: 'quiet', views: 1_000_000, likes: 100, caption: 'care' })
     expect(paidSignalsFor(quiet, medianLikeRate, medianViews)).toEqual(['low like rate'])
     const small = samplePost({ id: 'small', views: 10, likes: 0, caption: 'new' })

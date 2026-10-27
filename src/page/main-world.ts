@@ -1,12 +1,22 @@
-import { extractFollowerCounts, extractItems, extractUserId, extractUsers } from '../lib/instagram/extract'
-import { accountSearchUrl } from '../lib/instagram/search'
-import { isInstagramDataUrl, mergePost, parseBodies } from '../lib/instagram/capture'
+import { extractFollowerCounts, extractItems, extractSearchUsers, extractUsers } from '../lib/instagram/extract'
+import {
+  followingRequest,
+  profileMemory,
+  rememberProfile,
+  similarRequest,
+  type ProfileMemory,
+  type ProfileStorage,
+} from '../lib/profile-cache'
+import { requestMatchesKeyword } from '../lib/page-accounts'
+import { hashtagUrl } from '../lib/instagram/search'
+import { isInstagramDataUrl, parseBodies, rememberPosts } from '../lib/instagram/capture'
 import { normalizeMedia } from '../lib/instagram/normalize'
-import { findUserIdInText, HttpError } from '../lib/instagram/page-data'
+import { findUserIdInText, hasFeedbackRequired, HttpError, httpFailureMessage, parseFollowerCount, responseSnippet } from '../lib/instagram/page-data'
 import type { Post, SimilarAccount } from '../lib/types'
 import { ISO_SOURCE, MAIN_SOURCE, type MainCall } from '../lib/protocol'
 
 const APP_ID = '936619743392459'
+const DEFAULT_ASBD = '359341'
 const hooked = '__ifsHistoryHooked'
 
 function cookie(name: string): string {
@@ -14,30 +24,33 @@ function cookie(name: string): string {
   return match?.[1] ? decodeURIComponent(match[1]) : ''
 }
 
+function pageValue(pattern: RegExp): string {
+  for (const script of document.querySelectorAll('script:not([src])')) {
+    const match = script.textContent?.match(pattern)
+    if (match?.[1]) return match[1]
+  }
+  return ''
+}
+
 function headers(): Record<string, string> {
   const csrf = cookie('csrftoken')
   const claim = cookie('ig_www_claim')
+  const asbd = pageValue(/ASBD_ID["']?\s*[:=]\s*["']?(\d{4,10})/) || DEFAULT_ASBD
+  const ajax = pageValue(/rollout_hash["']?\s*[:=]\s*["']([A-Za-z0-9_-]{6,})/)
   return {
-    accept: 'application/json',
+    accept: '*/*',
     'x-ig-app-id': APP_ID,
+    'x-asbd-id': asbd,
     'x-csrftoken': csrf,
     'x-csrf-token': csrf,
     'x-requested-with': 'XMLHttpRequest',
+    ...(ajax ? { 'x-instagram-ajax': ajax } : {}),
     ...(claim ? { 'x-ig-www-claim': claim } : {}),
   }
 }
 
-const RETRY_DELAYS = [2000, 5000, 10000]
-
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-function retryAfterMs(response: Response): number | null {
-  const header = response.headers.get('retry-after')
-  if (!header) return null
-  const seconds = Number(header)
-  return Number.isFinite(seconds) ? Math.min(seconds * 1000, 30000) : null
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -56,31 +69,47 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   })
 }
 
-async function igFetch(url: string, init: RequestInit = {}, retries = RETRY_DELAYS.length): Promise<unknown> {
-  for (let attempt = 0; ; attempt += 1) {
-    const response = await fetch(url, {
-      credentials: 'include',
-      ...init,
-      headers: { ...headers(), ...(init.headers as Record<string, string> | undefined) },
-    })
-    if (response.status === 429 && attempt < retries) {
-      await wait(retryAfterMs(response) ?? RETRY_DELAYS[attempt])
-      continue
+function reportTrace(url: string, status: number, snippet: string): void {
+  const nonce = document.documentElement.getAttribute('data-ifs-nonce')
+  window.postMessage(
+    { source: MAIN_SOURCE, type: 'TRACE', nonce, url, status, snippet: snippet.slice(0, 180) },
+    window.location.origin,
+  )
+}
+
+async function igFetch(url: string, init: RequestInit = {}): Promise<unknown> {
+  const response = await fetch(url, {
+    credentials: 'include',
+    ...init,
+    headers: { ...headers(), ...(init.headers as Record<string, string> | undefined) },
+  })
+  const text = await response.text()
+  const snippet = responseSnippet(text) || (response.ok ? 'ok' : '')
+  reportTrace(url, response.status, snippet)
+  const feedback = hasFeedbackRequired(text)
+  if (response.status === 401 || response.status === 403) {
+      throw new HttpError(
+        `${httpFailureMessage(response.status, text)} Refresh the page and make sure you are signed in.`,
+        response.status,
+        url,
+        snippet,
+      )
     }
-    if (response.status === 401 || response.status === 403) {
-      throw new HttpError('Instagram refused the request. Refresh the page and make sure you are signed in.', response.status)
-    }
-    if (response.status === 429) {
-      throw new HttpError('Instagram is rate limiting this account. Wait a few minutes, then sort a smaller batch.', 429)
-    }
-    const text = await response.text()
-    if (!response.ok) throw new HttpError(`Instagram returned ${response.status} for this page.`, response.status)
-    try {
-      return JSON.parse(text) as unknown
-    } catch {
-      throw new HttpError('Instagram returned a page instead of post data. Refresh and try again.', response.status)
-    }
+  if (!response.ok || feedback) throw new HttpError(httpFailureMessage(response.status, text), response.status, url, snippet)
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    throw new HttpError(
+      'Instagram returned a page instead of post data. Refresh and try again.',
+      response.status,
+      url,
+      snippet || 'Instagram returned HTML instead of JSON.',
+    )
   }
+}
+
+function hardLimit(error: unknown): boolean {
+  return error instanceof HttpError && (error.status === 429 || /feedback_required/i.test(error.message))
 }
 
 function userIdFromPage(username: string): string | undefined {
@@ -94,22 +123,29 @@ function userIdFromPage(username: string): string | undefined {
   return undefined
 }
 
-async function profile(username: string): Promise<unknown> {
-  const fromPage = userIdFromPage(username)
-  if (fromPage) return { data: { user: { id: fromPage } } }
-  try {
-    return await igFetch(
-      `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
-    )
-  } catch (error) {
-    const search = (await igFetch(accountSearchUrl(username)).catch(() => null)) as {
-      users?: { user?: { username?: string; pk?: unknown; pk_id?: unknown } }[]
-    } | null
-    const hit = search?.users?.find((item) => item.user?.username?.toLowerCase() === username.toLowerCase())
-    const id = hit?.user?.pk_id ?? hit?.user?.pk
-    if (id != null) return { data: { user: { id: String(id) } } }
-    throw error
+function cachedUserId(username: string): string | undefined {
+  return userIds.get(username.toLowerCase()) || userIdFromPage(username)
+}
+
+async function waitForPageId(username: string): Promise<string | undefined> {
+  const deadline = Date.now() + 4000
+  while (Date.now() < deadline) {
+    const id = cachedUserId(username) || savedProfile(username)?.id
+    if (id) return id
+    await wait(250)
   }
+  return cachedUserId(username) || savedProfile(username)?.id
+}
+
+async function profile(username: string): Promise<unknown> {
+  scanEmbedded()
+  const known = cachedUserId(username) || savedProfile(username)?.id || (viewingProfile(username) ? await waitForPageId(username) : undefined)
+  if (known) {
+    userIds.set(username.toLowerCase(), known)
+    stashProfile(username, { id: known })
+    return { data: { user: { id: known } } }
+  }
+  return { data: { user: {} } }
 }
 
 function exceptTarget(username: string, accounts: SimilarAccount[]): SimilarAccount[] {
@@ -140,7 +176,7 @@ function relatedInDocument(): SimilarAccount[] {
 }
 
 function fetchOnce(url: string): Promise<unknown> {
-  return withTimeout(igFetch(url, {}, 0), 8000)
+  return withTimeout(igFetch(url), 8000)
 }
 
 function viewingProfile(username: string): boolean {
@@ -148,33 +184,47 @@ function viewingProfile(username: string): boolean {
   return first === username.toLowerCase()
 }
 
+function savedSuggestions(memory: ProfileMemory | undefined): SimilarAccount[] {
+  return (memory?.suggested ?? []).map((account) => ({
+    id: account.username,
+    username: account.username,
+    fullName: '',
+    verified: false,
+    url: `https://www.instagram.com/${account.username}/`,
+    followers: account.followers,
+    avatarUrl: null,
+    isPrivate: false,
+    category: null,
+    biography: null,
+  }))
+}
+
 async function similarTo(username: string): Promise<SimilarAccount[]> {
   if (viewingProfile(username)) {
     const embedded = exceptTarget(username, relatedInDocument())
-    if (embedded.length > 0) return embedded
+    if (embedded.length > 0) {
+      stashProfile(username, {
+        id: cachedUserId(username),
+        suggested: embedded.map((account) => ({ username: account.username, followers: account.followers })),
+      })
+      return embedded
+    }
   }
 
-  let id = userIdFromPage(username)
-  const profile = await fetchOnce(
-    `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
-  ).catch(() => null)
-  if (profile) {
-    const found = exceptTarget(username, extractUsers(profile))
-    if (found.length > 0) return found
-    id = id || extractUserId(profile)
-  }
-  if (!id) return []
+  const id = cachedUserId(username) || savedProfile(username)?.id || (viewingProfile(username) ? await waitForPageId(username) : undefined)
+  if (id) stashProfile(username, { id })
+  const memory = savedProfile(username)
+  const captured = exceptTarget(username, savedSuggestions(memory))
+  if (captured.length > 0 || !similarRequest(memory)) return captured
 
-  const urls = [
-    `https://www.instagram.com/api/v1/discover/chaining/?target_id=${encodeURIComponent(id)}&module=profile`,
-    `https://www.instagram.com/api/v1/discover/chaining/?target_id=${encodeURIComponent(id)}`,
-  ]
-  for (const url of urls) {
-    const raw = await fetchOnce(url).catch(() => null)
-    const found = raw ? exceptTarget(username, extractUsers(raw)) : []
-    if (found.length > 0) return found
-  }
-  return []
+  const url = similarRequest(memory)
+  if (!url) return []
+  const raw = await fetchOnce(url).catch((error: unknown) => {
+    if (hardLimit(error)) throw error
+    return null
+  })
+  if (!raw) return []
+  return exceptTarget(username, extractUsers(raw))
 }
 
 function withMax(url: string, maxId?: string): string {
@@ -184,21 +234,39 @@ function withMax(url: string, maxId?: string): string {
   return next.toString()
 }
 
-async function search(query: string, maxId?: string): Promise<unknown> {
-  const url = new URL('https://www.instagram.com/api/v1/fbsearch/web/top_serp/')
-  url.searchParams.set('query', query)
-  url.searchParams.set('enable_metadata', 'true')
-  if (maxId) url.searchParams.set('next_max_id', maxId)
-  const primary = await igFetch(url.toString())
-  if (maxId || extractItems(primary).length > 0) return primary
-  const tag = query.replace(/^#/, '')
-  if (!/^[A-Za-z0-9._]+$/.test(tag)) return primary
-  try {
-    const secondary = await igFetch(`https://www.instagram.com/api/v1/tags/web_info/?tag_name=${encodeURIComponent(tag)}`)
-    return extractItems(secondary).length > 0 ? secondary : primary
-  } catch {
-    return primary
+function capturedUserPayload(): unknown {
+  scanEmbedded()
+  return {
+    users: Array.from(capturedAccounts.values()).map((account) => ({
+      user: {
+        pk: account.id,
+        username: account.username,
+        full_name: account.fullName,
+        is_verified: account.verified,
+        is_private: account.isPrivate,
+        follower_count: account.followers,
+        profile_pic_url: account.avatarUrl,
+      },
+    })),
   }
+}
+
+async function reelsSearch(query: string): Promise<unknown> {
+  void query
+  return capturedUserPayload()
+}
+
+async function hashtagPage(query: string): Promise<unknown> {
+  const url = hashtagUrl(query)
+  if (!url) return { items: [] }
+  return igFetch(url)
+}
+
+async function search(query: string, maxId?: string): Promise<unknown> {
+  void query
+  void maxId
+  scanEmbedded()
+  return { items: Array.from(captured.values()) }
 }
 
 async function collection(id: string, maxId?: string): Promise<unknown> {
@@ -263,9 +331,22 @@ async function run(call: MainCall): Promise<unknown> {
       )
     case 'similar':
       return similarTo(call.username || '')
+    case 'user-search':
+      return capturedUserPayload()
+    case 'reels-search':
+      return reelsSearch(call.query || '')
+    case 'hashtag':
+      return hashtagPage(call.query || '')
     case 'captured':
       scanEmbedded()
       return Array.from(captured.values())
+    case 'captured-accounts':
+      scanEmbedded()
+      return Array.from(capturedAccounts.values())
+    case 'search-hits':
+      return Array.from(searchHits.values())
+    case 'capture-pulse':
+      return { inflight: inflightData, pages: mediaPages }
     case 'followers':
       return followers(call.username || '')
     case 'following':
@@ -296,43 +377,176 @@ function hookHistory(): void {
 }
 
 const captured = new Map<string, Post>()
+const capturedAccounts = new Map<string, SimilarAccount>()
+const searchHits = new Map<string, SimilarAccount>()
+let inflightData = 0
+let mediaPages = 0
+
+function finishInflight(): void {
+  inflightData = Math.max(0, inflightData - 1)
+}
+
+function ingestTracked(text: string, meta?: { url: string; body: string }): void {
+  const before = captured.size
+  ingestText(text, meta)
+  if (captured.size > before) mediaPages += 1
+}
 const followerCounts = new Map<string, number>()
+const userIds = new Map<string, string>()
 const scannedScripts = new WeakSet<Element>()
 
+function rememberIds(raw: unknown): void {
+  const walk = (node: unknown, depth: number) => {
+    if (!node || typeof node !== 'object' || depth > 12) return
+    if (Array.isArray(node)) {
+      if (depth > 6 && node.length > 40) return
+      for (const item of node) walk(item, depth + 1)
+      return
+    }
+    const record = node as Record<string, unknown>
+    if (typeof record.username === 'string' && record.username) {
+      const id = record.pk_id ?? record.pk ?? record.id
+      if ((typeof id === 'string' || typeof id === 'number') && /^\d{3,20}$/.test(String(id))) {
+        userIds.set(record.username.toLowerCase(), String(id))
+      }
+    }
+    for (const value of Object.values(record)) walk(value, depth + 1)
+  }
+  walk(raw, 0)
+}
+
+function openProfileUsername(): string {
+  const parts = location.pathname.split('/').filter(Boolean)
+  const first = parts[0] || ''
+  if (!/^[A-Za-z0-9._]{1,30}$/.test(first)) return ''
+  const reserved = new Set(['explore', 'reels', 'reel', 'p', 'stories', 'accounts', 'direct', 'about', 'legal'])
+  if (reserved.has(first.toLowerCase())) return ''
+  const second = (parts[1] || '').toLowerCase()
+  if (parts.length === 1 || second === 'reels') return first
+  return ''
+}
+
+function followersFromDom(): number | null {
+  const bits: string[] = []
+  const meta = document.querySelector('meta[property="og:description"], meta[name="description"]')
+  const content = meta?.getAttribute('content')
+  if (content) bits.push(content)
+  const header = document.querySelector('header')
+  if (header?.textContent) bits.push(header.textContent)
+  const link = document.querySelector('a[href*="/followers/"]')
+  if (link?.textContent) bits.push(`${link.textContent} followers`)
+  for (const bit of bits) {
+    const count = parseFollowerCount(bit)
+    if (count != null) return count
+  }
+  return null
+}
+
+function profileStore(): ProfileStorage {
+  return sessionStorage
+}
+
+function savedProfile(username: string): ProfileMemory | undefined {
+  try {
+    return profileMemory(profileStore(), username)
+  } catch {
+    return undefined
+  }
+}
+
+function stashProfile(username: string, patch: Partial<ProfileMemory>): void {
+  if (!username) return
+  try {
+    rememberProfile(profileStore(), username, patch)
+  } catch {
+    // sessionStorage can be blocked. The page data already in memory still serves this document.
+  }
+}
+
+function onReelsGrid(): boolean {
+  const parts = location.pathname.split('/').filter(Boolean)
+  return (parts[1] || '').toLowerCase() === 'reels' && openProfileUsername() !== ''
+}
+
 function ingest(raw: unknown): void {
-  for (const item of extractItems(raw, 80)) {
-    const post = normalizeMedia(item)
-    if (post) captured.set(post.id, mergePost(captured.get(post.id), post))
+  const profileName = openProfileUsername()
+  rememberPosts(captured, raw, profileName, onReelsGrid())
+  for (const account of extractUsers(raw)) {
+    const key = account.username.toLowerCase()
+    const existing = capturedAccounts.get(key)
+    if (!existing || (existing.followers == null && account.followers != null)) capturedAccounts.set(key, account)
   }
   for (const [username, count] of extractFollowerCounts(raw)) followerCounts.set(username, count)
+  rememberIds(raw)
+  if (!profileName) return
+  const key = profileName.toLowerCase()
+  const suggested = extractUsers(raw, false)
+    .filter((account) => account.username.toLowerCase() !== key)
+    .map((account) => ({ username: account.username, followers: account.followers }))
+  const followers = followerCounts.get(key) ?? followersFromDom()
+  stashProfile(profileName, {
+    id: userIds.get(key),
+    followers: followers ?? undefined,
+    suggested,
+  })
 }
 
 async function followingPage(username: string, maxId?: string): Promise<unknown> {
-  const info = await profile(username)
-  const id = extractUserId(info)
-  if (!id) throw new HttpError('Instagram did not return that profile.', 404)
-  const url = new URL(`https://www.instagram.com/api/v1/friendships/${encodeURIComponent(id)}/following/`)
-  url.searchParams.set('count', '12')
-  if (maxId) url.searchParams.set('max_id', maxId)
-  return igFetch(url.toString())
+  scanEmbedded()
+  const id = cachedUserId(username) || savedProfile(username)?.id || (viewingProfile(username) ? await waitForPageId(username) : undefined)
+  if (!id) return { users: [] }
+  stashProfile(username, { id })
+  const url = followingRequest(savedProfile(username), maxId)
+  if (!url) return { users: [] }
+  return igFetch(url)
 }
 
 async function followers(username: string): Promise<number | null> {
   const key = username.toLowerCase()
   if (!key) return null
+  const saved = savedProfile(username)
+  if (saved?.followers != null) return saved.followers
   scanEmbedded()
   const known = followerCounts.get(key)
   if (known != null) return known
-  try {
-    ingest(await igFetch(`https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`))
-  } catch {
-    return null
+  if (viewingProfile(username)) {
+    const fromDom = followersFromDom()
+    if (fromDom != null) {
+      followerCounts.set(key, fromDom)
+      stashProfile(username, { followers: fromDom })
+    }
+    return fromDom
   }
-  return followerCounts.get(key) ?? null
+  return null
 }
 
-function ingestText(text: string): void {
-  for (const body of parseBodies(text)) ingest(body)
+function bodyText(body: unknown): string {
+  if (typeof body === 'string') return body
+  if (body instanceof URLSearchParams) return body.toString()
+  if (typeof FormData !== 'undefined' && body instanceof FormData) {
+    const parts: string[] = []
+    body.forEach((value, key) => {
+      if (typeof value === 'string') parts.push(`${key}=${value}`)
+    })
+    return parts.join('&')
+  }
+  return ''
+}
+
+function rememberSearch(raw: unknown, url: string, body: string): void {
+  if (!requestMatchesKeyword(location.href, url, body)) return
+  for (const account of extractSearchUsers(raw)) {
+    const key = account.username.toLowerCase()
+    const existing = searchHits.get(key)
+    if (!existing || (existing.followers == null && account.followers != null)) searchHits.set(key, account)
+  }
+}
+
+function ingestText(text: string, meta?: { url: string; body: string }): void {
+  for (const parsed of parseBodies(text)) {
+    ingest(parsed)
+    if (meta) rememberSearch(parsed, meta.url, meta.body)
+  }
 }
 
 function scanEmbedded(): void {
@@ -354,19 +568,25 @@ function requestUrl(input: unknown): string {
 function hookNetwork(): void {
   const originalFetch = window.fetch
   window.fetch = async function (this: unknown, ...args: Parameters<typeof fetch>) {
-    const response = await originalFetch.apply(this, args)
+    const url = requestUrl(args[0])
+    const tracked = isInstagramDataUrl(url, location.href)
+    if (tracked) inflightData += 1
     try {
-      if (isInstagramDataUrl(requestUrl(args[0]), location.href)) {
+      const response = await originalFetch.apply(this, args)
+      if (tracked) {
+        const body = bodyText(args[1]?.body)
         response
           .clone()
           .text()
-          .then(ingestText)
+          .then((text) => ingestTracked(text, { url, body }))
           .catch(() => undefined)
+          .finally(finishInflight)
       }
-    } catch {
-      // Never break Instagram's own requests.
+      return response
+    } catch (error) {
+      if (tracked) finishInflight()
+      throw error
     }
-    return response
   } as typeof fetch
 
   type TaggedRequest = XMLHttpRequest & { __ifsUrl?: string }
@@ -378,15 +598,34 @@ function hookNetwork(): void {
     return open.apply(this, args)
   }
   proto.send = function (this: TaggedRequest, body?: Document | XMLHttpRequestBodyInit | null) {
-    if (this.__ifsUrl && isInstagramDataUrl(this.__ifsUrl, location.href)) {
+    const url = this.__ifsUrl || ''
+    const sent = bodyText(body)
+    const tracked = Boolean(url && isInstagramDataUrl(url, location.href))
+    if (tracked) {
+      inflightData += 1
+      let settled = false
+      const done = () => {
+        if (settled) return
+        settled = true
+        finishInflight()
+      }
       this.addEventListener('load', () => {
         try {
-          if (this.responseType === '' || this.responseType === 'text') ingestText(this.responseText)
-          else if (this.responseType === 'json') ingest(this.response)
+          const before = captured.size
+          if (this.responseType === '' || this.responseType === 'text') ingestText(this.responseText, { url, body: sent })
+          else if (this.responseType === 'json') {
+            ingest(this.response)
+            rememberSearch(this.response, url, sent)
+          }
+          if (captured.size > before) mediaPages += 1
         } catch {
           // Ignore responses we cannot read.
+        } finally {
+          done()
         }
       })
+      this.addEventListener('error', done)
+      this.addEventListener('abort', done)
     }
     return send.call(this, body)
   }
@@ -406,13 +645,20 @@ if (!pageWindow.__ifsMainInstalled) {
   if (!data || data.source !== ISO_SOURCE || !nonceMatches(data.nonce) || !data.id) return
   run(data)
     .then((payload) => {
+      try {
+        ingest(payload)
+      } catch {
+        // A non-post payload still goes back to the content script.
+      }
       window.postMessage({ source: MAIN_SOURCE, nonce: data.nonce, id: data.id, payload }, window.location.origin)
     })
     .catch((error: unknown) => {
       const message = error instanceof Error ? error.message : 'Instagram did not answer.'
       const status = error instanceof HttpError ? error.status : 0
+      const url = error instanceof HttpError ? error.url : ''
+      const snippet = error instanceof HttpError ? error.snippet : ''
       window.postMessage(
-        { source: MAIN_SOURCE, nonce: data.nonce, id: data.id, error: message, status },
+        { source: MAIN_SOURCE, nonce: data.nonce, id: data.id, error: message, status, url, snippet },
         window.location.origin,
       )
     })
