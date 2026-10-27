@@ -735,11 +735,13 @@ export function registerReelExport(username: string, posts: Post[]): void {
   exportPostsInOrder = posts
 }
 
+export type ReelExportKind = 'csv' | 'xlsx' | 'json' | 'copy' | 'download'
+
 export async function exportCapturedReels(
   posts: Post[],
   username: string,
   includeAds: boolean,
-  mode: 'download' | 'copy',
+  mode: ReelExportKind,
 ): Promise<{ ok: boolean; error?: string; tsv?: string }> {
   if (posts.length === 0) {
     notify(SORT_FIRST)
@@ -750,7 +752,8 @@ export async function exportCapturedReels(
     notify(SORT_FIRST)
     return { ok: false, error: SORT_FIRST }
   }
-  if (mode === 'copy') {
+  const kind = mode === 'download' ? 'csv' : mode
+  if (kind === 'copy') {
     try {
       await copyText(built.tsv)
     } catch (error) {
@@ -759,8 +762,21 @@ export async function exportCapturedReels(
     notify(`Copied ${built.rows} rows.`)
     return { ok: true, tsv: built.tsv }
   }
+  const stem = built.filename.replace(/\.csv$/, '')
   try {
-    await send({ type: 'DOWNLOAD_TEXT', filename: downloadName(built.filename), mime: 'text/csv;charset=utf-8', text: built.csv })
+    if (kind === 'json') {
+      await send({ type: 'DOWNLOAD_TEXT', filename: downloadName(`${stem}.json`), mime: 'application/json', text: built.json })
+    } else if (kind === 'xlsx') {
+      const bytes = await buildXlsx('Reels', built.sheet)
+      await send({
+        type: 'DOWNLOAD_BYTES',
+        filename: downloadName(`${stem}.xlsx`),
+        mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        base64: base64Of(bytes),
+      })
+    } else {
+      await send({ type: 'DOWNLOAD_TEXT', filename: downloadName(built.filename), mime: 'text/csv;charset=utf-8', text: built.csv })
+    }
   } catch (error) {
     notify(humanError(error))
     return { ok: false, error: humanError(error) }
@@ -978,7 +994,8 @@ export function onMessage(
   }
   if (message?.type === 'EXPORT_REELS') {
     const includeAds = Boolean((message as { includeAds?: unknown }).includeAds)
-    const mode = (message as { action?: unknown }).action === 'copy' ? 'copy' : 'download'
+    const action = (message as { action?: unknown }).action
+    const mode = action === 'copy' || action === 'json' || action === 'xlsx' || action === 'csv' ? action : 'csv'
     void exportCapturedReels(exportPostsInOrder, exportUsername, includeAds, mode).then(sendResponse)
     return true
   }

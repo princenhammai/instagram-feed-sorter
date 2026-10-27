@@ -39,9 +39,11 @@ The extension is portable across desktop operating systems. GitHub hosting does 
 
 ## Export the sorted Reels
 
-After you sort a profile, **Export** on the popup or the sorted panel downloads the Reels already captured, in the current sort order. It does not load more posts. Ads and paid partnerships stay out unless **Include ads** is checked. **Copy table** puts the same rows on the clipboard as tab-separated text for Google Sheets.
+After you sort a profile, the popup and the sorted panel can save the Reels already captured, in the current sort order. They do not load more posts. Ads and paid partnerships stay out unless **Include ads** is checked.
 
-The file is `<username>-reels-YYYY-MM-DD.csv` in an `Instagram Feed Sorter` folder. It is UTF-8 with a byte order mark so Excel keeps Vietnamese captions. Columns are rank, username, shortcode, url, views, likes, comments, posted date (ISO), caption (first 200 characters), duration seconds, outlier score (views divided by that account's median views), and is_ad. If nothing has been captured yet, the extension shows “Sort the profile first” and does not write a file.
+**Export CSV**, **Excel**, and **JSON** use the same columns. **Copy table** puts those rows on the clipboard as tab-separated text for Google Sheets. CSV is UTF-8 with a byte order mark so Excel keeps Vietnamese captions. Numbers stay numbers in Excel and JSON. A caption that starts with `=` is saved as text so a spreadsheet does not run it.
+
+Files are named `<username>-reels-YYYY-MM-DD` and land in an `Instagram Feed Sorter` folder. Columns are Rank, Username, Shortcode, URL, Views, Likes, Comments, Posted date (ISO), Caption (first 200 characters), Duration (s), Outlier score (views divided by that account's median views, two decimals), and Is ad. If nothing has been captured yet, the extension shows “Sort the profile first” and does not write a file.
 - Download media and keep posts in local folders with the Library.
 - Optional video transcription using your own Whisper-compatible provider/key.
 - View related accounts suggested by Instagram from the Sorter overlay.

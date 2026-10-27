@@ -251,8 +251,14 @@ function Workspace({ model }: { model: ReadyModel }) {
             <input type="checkbox" checked={includeAds} onChange={(event) => setIncludeAds(event.target.checked)} />
             Include ads
           </label>
-          <button type="button" className="outline" onClick={() => void exportCapturedReels(sorted, profileName, includeAds, 'download')}>
-            Export
+          <button type="button" className="outline" onClick={() => void exportCapturedReels(sorted, profileName, includeAds, 'csv')}>
+            Export CSV
+          </button>
+          <button type="button" className="outline" onClick={() => void exportCapturedReels(sorted, profileName, includeAds, 'xlsx')}>
+            Excel
+          </button>
+          <button type="button" className="outline" onClick={() => void exportCapturedReels(sorted, profileName, includeAds, 'json')}>
+            JSON
           </button>
           <button type="button" className="outline" onClick={() => void exportCapturedReels(sorted, profileName, includeAds, 'copy')}>
             Copy table

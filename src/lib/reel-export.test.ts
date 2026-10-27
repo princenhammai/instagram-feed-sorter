@@ -1,80 +1,127 @@
 import { describe, expect, it } from 'vitest'
-import { buildReelExport, reelIsAd } from './reel-export'
+import JSZip from 'jszip'
+import { buildXlsx } from './xlsx'
+import { buildReelExport, reelIsAd, type ExportReel } from './reel-export'
 import { samplePost } from './sample'
-import type { ExportReel } from './reel-export'
 
 const NOW = new Date(2026, 9, 27, 15)
 
 function reel(overrides: Partial<ExportReel> = {}): ExportReel {
-  return { ...samplePost({ username: 'ada', takenAt: Date.UTC(2024, 0, 2), duration: 12 }), ...overrides }
+  return { ...samplePost({ username: 'ada', takenAt: Date.UTC(2024, 0, 2), duration: 12.34, likes: 8, comments: 1 }), ...overrides }
 }
 
-describe('reel csv export', () => {
-  it('escapes commas, quotes, and newlines in captions', () => {
-    const csv = buildReelExport([reel({ caption: 'xin chào, "bạn"\nline two' })], {
-      includeAds: false,
-      username: 'ada',
-      now: NOW,
-    }).csv
-    expect(csv.charCodeAt(0)).toBe(0xfeff)
-    expect(csv).toContain('"xin chào, ""bạn""\nline two"')
-    expect(csv.startsWith('\uFEFFrank,username,shortcode,url,views,likes,comments,posted_date,caption,duration_seconds,outlier_score,is_ad\r\n')).toBe(true)
-  })
+const posts: ExportReel[] = [
+  reel({
+    id: '1',
+    shortcode: 'keep',
+    views: 10,
+    caption: 'xin chào, "bạn"\nline two & more',
+  }),
+  reel({ id: '2', shortcode: 'mid', views: 30, caption: '=SUM(A1)', likes: null, comments: null, duration: null }),
+  reel({ id: '3', shortcode: 'blank', views: null, caption: `${'á'.repeat(180)} end of the sentence that should be cut` }),
+  reel({ id: '4', shortcode: 'paid', views: 1000, paidPartnership: true, is_paid_partnership: true }),
+]
 
-  it('hides paid partnerships and ad flags unless include ads is set', () => {
-    const posts = [
-      reel({ id: '1', shortcode: 'keep', views: 100 }),
-      reel({ id: '2', shortcode: 'paid', views: 200, paidPartnership: true }),
-      reel({ id: '3', shortcode: 'rawpaid', views: 300, is_paid_partnership: true }),
-      reel({ id: '4', shortcode: 'flagged', views: 400, isAd: true }),
-      reel({ id: '5', shortcode: 'adfield', views: 500, ad: true }),
-    ]
-    const hidden = buildReelExport(posts, { includeAds: false, username: 'ada', now: NOW })
-    expect(hidden.rows).toBe(1)
-    expect(hidden.csv).toContain('keep')
-    expect(hidden.csv).not.toContain('paid')
-    expect(hidden.csv).not.toContain('rawpaid')
-    expect(hidden.csv).not.toContain('flagged')
-    expect(hidden.csv).not.toContain('adfield')
-    expect(reelIsAd(posts[1]!)).toBe(true)
+function exported(includeAds: boolean) {
+  return buildReelExport(posts, { includeAds, username: '@ada', now: NOW })
+}
 
-    const shown = buildReelExport(posts, { includeAds: true, username: 'ada', now: NOW })
-    expect(shown.rows).toBe(5)
-    expect(shown.csv).toContain(',true')
-    expect(shown.csv).toContain(',false')
-  })
-
-  it('scores outliers as views divided by the account median', () => {
-    const posts = [
-      reel({ id: 'a', shortcode: 'low', views: 10 }),
-      reel({ id: 'b', shortcode: 'mid', views: 30 }),
-      reel({ id: 'c', shortcode: 'ad', views: 1000, paidPartnership: true }),
-    ]
-    const file = buildReelExport(posts, { includeAds: false, username: 'ada', now: NOW })
-    expect(file.csv).toContain('low,https://www.instagram.com/reel/low/,10,')
-    expect(file.csv).toContain(',0.33,')
-    expect(file.csv).toContain(',1.00,')
-    expect(file.csv).not.toContain('1000')
-  })
-
-  it('keeps the current order and ranks from 1', () => {
-    const posts = [
-      reel({ id: 'z', shortcode: 'second', views: 50 }),
-      reel({ id: 'a', shortcode: 'first', views: 10 }),
-    ]
-    const file = buildReelExport(posts, { includeAds: true, username: '@ada', now: NOW })
-    const lines = file.csv.replace(/^\uFEFF/, '').trim().split('\r\n')
-    expect(lines[1]?.startsWith('1,ada,second,')).toBe(true)
-    expect(lines[2]?.startsWith('2,ada,first,')).toBe(true)
+describe('reel export formats', () => {
+  it('writes an Excel-ready CSV with a BOM, quoted captions, and two-decimal outliers', () => {
+    const file = exported(false)
+    expect(file.rows).toBe(3)
     expect(file.filename).toBe('ada-reels-2026-10-27.csv')
-    expect(file.tsv.split('\n')[1]).toContain('https://www.instagram.com/reel/second/')
+    expect(file.csv.charCodeAt(0)).toBe(0xfeff)
+    expect(file.csv.startsWith('\uFEFFRank,Username,Shortcode,URL,Views,Likes,Comments,Posted date,Caption,Duration (s),Outlier score,Is ad\r\n')).toBe(true)
+    expect(file.csv).toContain('"xin chào, ""bạn""\nline two & more"')
+    expect(file.csv).toContain("'=SUM(A1)")
+    expect(file.csv).toContain('https://www.instagram.com/reel/keep/')
     expect(file.csv).toContain('2024-01-02T00:00:00.000Z')
+    expect(file.csv).toContain(',0.33,No')
+    expect(file.csv).toContain(',1.00,No')
+    expect(file.csv).toContain(',12.3,,No')
+    expect(file.csv).not.toContain('paid')
+    expect(file.csv).not.toContain('should be cut')
+    expect(file.csv).toContain('á'.repeat(180))
+    expect(reelIsAd(posts[3]!)).toBe(true)
   })
 
-  it('keeps only the first 200 characters of a caption', () => {
-    const caption = `${'á'.repeat(180)} end of the sentence that should be cut`
-    const file = buildReelExport([reel({ caption })], { includeAds: false, username: 'ada', now: NOW })
-    expect(file.csv).toContain('á'.repeat(180))
-    expect(file.csv).not.toContain('should be cut')
+  it('copies the same rows as TSV for Google Sheets', () => {
+    const file = exported(false)
+    expect(file.tsv.split('\n')[0]?.split('\t')).toEqual([...file.headers])
+    expect(file.tsv).toContain('1\tada\tkeep\thttps://www.instagram.com/reel/keep/\t10\t8\t1\t2024-01-02T00:00:00.000Z\t')
+    expect(file.tsv).toContain('"xin chào, ""bạn""\nline two & more"')
+    expect(file.tsv).toContain("'=SUM(A1)")
+    expect(file.tsv).toContain('\t0.33\tNo')
+    expect(file.tsv).toContain('\t1.00\tNo')
+    expect(file.tsv).not.toContain('1000')
+  })
+
+  it('writes JSON with numbers, nulls, and a real ad flag', () => {
+    const hidden = exported(false)
+    const records = JSON.parse(hidden.json) as Record<string, unknown>[]
+    expect(records).toHaveLength(3)
+    expect(records[0]).toMatchObject({
+      Rank: 1,
+      Username: 'ada',
+      Shortcode: 'keep',
+      URL: 'https://www.instagram.com/reel/keep/',
+      Views: 10,
+      Likes: 8,
+      Comments: 1,
+      'Posted date': '2024-01-02T00:00:00.000Z',
+      'Duration (s)': 12.3,
+      'Outlier score': 0.33,
+      'Is ad': false,
+    })
+    expect(records[1]).toMatchObject({
+      Rank: 2,
+      Shortcode: 'mid',
+      Likes: null,
+      Comments: null,
+      'Duration (s)': null,
+      'Outlier score': 1,
+      Caption: '=SUM(A1)',
+    })
+    expect(records[2]).toMatchObject({ Views: null, 'Outlier score': null, 'Is ad': false })
+    expect(String(records[2]?.Caption)).toHaveLength(200)
+
+    const shown = JSON.parse(exported(true).json) as { Shortcode: string; 'Is ad': boolean; 'Outlier score': number | null }[]
+    expect(shown.map((row) => row.Shortcode)).toEqual(['keep', 'mid', 'blank', 'paid'])
+    expect(shown.filter((row) => row['Is ad']).map((row) => row.Shortcode)).toEqual(['paid'])
+    expect(shown[0]?.['Outlier score']).toBe(0.33)
+    expect(shown[3]?.['Outlier score']).toBe(33.33)
+  })
+
+  it('writes an Excel workbook with numeric metrics and escaped captions', async () => {
+    const file = exported(true)
+    const bytes = await buildXlsx('Reels', file.sheet)
+    const zip = await JSZip.loadAsync(bytes)
+    const sheet = await zip.file('xl/worksheets/sheet1.xml')?.async('string')
+    expect(sheet).toContain('Rank')
+    expect(sheet).toContain('Outlier score')
+    expect(sheet).toContain('https://www.instagram.com/reel/paid/')
+    expect(sheet).toContain('line two &amp; more')
+    expect(sheet).toContain("'=SUM(A1)")
+    expect(sheet).toContain('<v>10</v>')
+    expect(sheet).toContain('<v>0.33</v>')
+    expect(sheet).toContain('<v>1</v>')
+    expect(sheet).toContain('<v>33.33</v>')
+    expect(sheet).toContain('<v>12.3</v>')
+    expect(sheet).toContain('>Yes</t>')
+    expect(sheet).toContain('>No</t>')
+    expect(file.sheet[1]?.[4]).toBe(10)
+    expect(file.sheet[1]?.[10]).toBe(0.33)
+    expect(file.sheet[4]?.[11]).toBe('Yes')
+  })
+
+  it('keeps the given order as rank 1, 2, 3', () => {
+    const file = exported(false)
+    const keep = file.csv.indexOf('1,ada,keep,')
+    const mid = file.csv.indexOf('2,ada,mid,')
+    const blank = file.csv.indexOf('3,ada,blank,')
+    expect(keep).toBeGreaterThan(0)
+    expect(mid).toBeGreaterThan(keep)
+    expect(blank).toBeGreaterThan(mid)
   })
 })

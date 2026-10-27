@@ -138,7 +138,7 @@ export function App() {
     }
   }
 
-  async function exportCaptured(action: 'download' | 'copy') {
+  async function exportCaptured(action: 'csv' | 'xlsx' | 'json' | 'copy') {
     setExportNote('')
     setError('')
     try {
@@ -387,8 +387,14 @@ export function App() {
           Include ads
         </label>
         <div className="row">
-          <button type="button" className="primary" onClick={() => void exportCaptured('download')}>
-            Export
+          <button type="button" className="primary" onClick={() => void exportCaptured('csv')}>
+            Export CSV
+          </button>
+          <button type="button" onClick={() => void exportCaptured('xlsx')}>
+            Excel
+          </button>
+          <button type="button" onClick={() => void exportCaptured('json')}>
+            JSON
           </button>
           <button type="button" onClick={() => void exportCaptured('copy')}>
             Copy table
