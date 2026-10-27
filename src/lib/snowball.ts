@@ -572,6 +572,42 @@ export function snowballQueueTable(queue: QueueItem[]): (string | number | null)
   ]
 }
 
+export function snowballReelTable(accounts: ScoredAccount[]): (string | number | null)[][] {
+  const headers = ['Account', 'Grade', 'Depth', 'Shortcode', 'Views', 'Likes', 'Comments', 'Caption', 'URL', 'Provenance']
+  const rank = { STRONG: 0, MAYBE: 1, WEAK: 2, ERROR: 3 }
+  const ordered = [...accounts].sort((a, b) => rank[a.grade] - rank[b.grade] || a.depth - b.depth || a.username.localeCompare(b.username))
+  const rows: (string | number | null)[][] = [headers]
+  for (const account of ordered) {
+    for (const reel of account.reels) {
+      rows.push([
+        account.username,
+        account.grade,
+        account.depth,
+        reel.shortcode,
+        reel.views,
+        reel.likes,
+        reel.comments,
+        reel.caption,
+        reel.url,
+        account.provenance,
+      ])
+    }
+  }
+  return rows
+}
+
+export function snowballWorkbookSheets(job: SnowballJob): { name: string; rows: (string | number | null)[][] }[] {
+  return [
+    { name: 'Accounts', rows: snowballAccountTable(job.accounts) },
+    { name: 'Reels', rows: snowballReelTable(job.accounts) },
+    { name: 'Queue', rows: snowballQueueTable(job.queue) },
+  ]
+}
+
+export function snowballHasExport(job: SnowballJob): boolean {
+  return job.accounts.length > 0
+}
+
 export function snowballCsv(accounts: ScoredAccount[]): string {
   return tableToCsv(snowballAccountTable(accounts))
 }

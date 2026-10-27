@@ -1,9 +1,20 @@
 import type { SimilarAccount } from '../types'
 
+/** Later Reels pages are sometimes only `{ code }` with no pk. Real shortcodes are 8–15 characters. */
+const CODE_ONLY = /^[A-Za-z0-9_-]{8,15}$/
+
+function mediaCode(raw: object): string {
+  const media = raw as { code?: unknown; shortcode?: unknown; media_code?: unknown }
+  return String(media.code || media.shortcode || media.media_code || '')
+}
+
 export function looksLikeMedia(raw: unknown): boolean {
   if (!raw || typeof raw !== 'object') return false
-  const media = raw as { code?: unknown; shortcode?: unknown; pk?: unknown; id?: unknown }
-  return Boolean((media.code || media.shortcode) && (media.pk || media.id))
+  const media = raw as { pk?: unknown; id?: unknown }
+  const code = mediaCode(raw)
+  const id = media.pk ?? media.id
+  if (code && id != null && String(id) !== '') return true
+  return CODE_ONLY.test(code)
 }
 
 function unwrap(item: unknown): unknown {

@@ -3,7 +3,7 @@ import { collectGridReels } from './capture-reels'
 import { collectSearchAccounts } from './capture-search'
 import { recordTrace } from './request-log'
 import { notify, patch } from './store'
-import { accountGapMs, isRateLimited, reelsUrl, SLOWDOWN_MESSAGE } from '../lib/batch'
+import { accountGapMs, isRateLimited, reelsUrl } from '../lib/batch'
 import { humanError } from '../lib/format'
 import { downloadName, safeSegment } from '../lib/media-files'
 import { isKeywordSearchPage, keywordSearchUrl, searchCaptureNote } from '../lib/page-accounts'
@@ -23,12 +23,13 @@ import {
   progressLabel,
   resumeSnowball,
   slowdownSnowball,
-  snowballAccountTable,
   snowballCsv,
-  snowballQueueTable,
+  snowballHasExport,
+  snowballWorkbookSheets,
   type SearchHit,
   type SnowballJob,
 } from '../lib/snowball'
+import type { Post } from '../lib/types'
 import { buildWorkbook } from '../lib/xlsx'
 
 let snowballBusy = false
@@ -102,17 +103,13 @@ function syncRows(job: SnowballJob): SummarySyncRow[] {
     }))
 }
 
-async function exportSnowball(job: SnowballJob): Promise<void> {
+async function exportSnowball(job: SnowballJob, partial = false): Promise<boolean> {
+  if (!snowballHasExport(job)) return false
   const stamp = new Date().toISOString().slice(0, 10)
   const base = downloadName(safeSegment(`snowball-${stamp}`))
   const csv = snowballCsv(job.accounts)
   const csvResult = await deliver({ type: 'DOWNLOAD_TEXT', filename: `${base}.csv`, mime: 'text/csv;charset=utf-8', text: csv })
-  const bytes = new Uint8Array(
-    await buildWorkbook([
-      { name: 'Accounts', rows: snowballAccountTable(job.accounts) },
-      { name: 'Queue', rows: snowballQueueTable(job.queue) },
-    ]),
-  )
+  const bytes = new Uint8Array(await buildWorkbook(snowballWorkbookSheets(job)))
   const xlsxResult = await deliver({
     type: 'DOWNLOAD_BYTES',
     filename: `${base}.xlsx`,
@@ -133,7 +130,14 @@ async function exportSnowball(job: SnowballJob): Promise<void> {
   const problem = [csvResult.ok ? '' : csvResult.error || 'CSV was not saved.', xlsxResult.ok ? '' : xlsxResult.error || 'Excel was not saved.']
     .filter(Boolean)
     .join(' ')
-  notify(problem ? `Snowball finished. ${problem}${syncNote}` : `Snowball export saved.${syncNote} ${job.note || ''}`)
+  const lead = partial ? 'Saved the accounts scored so far.' : 'Snowball export saved.'
+  notify(problem ? `${lead} ${problem}${syncNote} ${job.note || ''}` : `${lead}${syncNote} ${job.note || ''}`)
+  return true
+}
+
+async function writePartial(job: SnowballJob): Promise<void> {
+  const wrote = await exportSnowball(job, true)
+  if (!wrote) notify(job.note || 'Snowball paused.')
 }
 
 function pause(ms: number, signal: AbortSignal): Promise<boolean> {
@@ -177,7 +181,7 @@ async function runOnce(): Promise<void> {
   await saveSnowball(planned.job)
   if (planned.step.type === 'pause') {
     patch({ phase: { type: 'idle' } })
-    notify(planned.step.note || 'Snowball paused.')
+    await writePartial(planned.job)
     return
   }
   if (planned.step.type === 'done') {
@@ -220,8 +224,10 @@ async function runOnce(): Promise<void> {
       snippet: noted.snippet,
     })
     if (found.aborted || signal.aborted) {
-      await saveSnowball(pauseSnowball(latest, 'Paused.'))
+      const paused = pauseSnowball(latest, 'Paused.')
+      await saveSnowball(paused)
       patch({ phase: { type: 'idle' } })
+      await writePartial(paused)
       return
     }
     sessionStorage.removeItem(KEYWORD_HOP)
@@ -272,9 +278,12 @@ async function runOnce(): Promise<void> {
       })
     }
     let followers: number | null = null
+    let posts: Post[] = []
+    let gridRead = false
     try {
       const captured = await collectGridReels(username, latest.settings.reelsPerAccount, signal, (collected) => showCollecting(collected))
-      const posts = captured.posts
+      posts = captured.posts
+      gridRead = true
       showCollecting(posts.length, true)
       const trace = gridCaptureSnippet(posts.length, captured.timedOut, captured.pages, accountCaptureMs(latest.settings.reelsPerAccount))
       recordTrace({
@@ -288,29 +297,28 @@ async function runOnce(): Promise<void> {
         if (isRateLimited(humanError(error))) throw error
         followers = null
       }
+      const error = posts.length === 0 ? trace.snippet : undefined
+      const scored = applyScore(latest, { username, followers, posts, error }, Date.now())
       if (signal.aborted) {
-        await saveSnowball(pauseSnowball(latest, 'Paused.'))
+        const paused = pauseSnowball(scored, 'Paused.')
+        await saveSnowball(paused)
         patch({ phase: { type: 'idle' } })
-        notify('Snowball paused. Resume it from the research panel.')
+        await writePartial(paused)
         return
       }
-      const error = posts.length === 0 ? trace.snippet : undefined
-      await saveSnowball(applyScore(latest, { username, followers, posts, error }, Date.now()))
+      await saveSnowball(scored)
       snowballAgain = true
     } catch (error) {
-      if (signal.aborted) {
-        await saveSnowball(pauseSnowball(latest, 'Paused.'))
-        patch({ phase: { type: 'idle' } })
-        return
-      }
       const message = humanError(error)
-      if (isRateLimited(message)) {
-        await saveSnowball(slowdownSnowball(latest))
+      const base = gridRead ? applyScore(latest, { username, followers, posts, error: posts.length === 0 ? message : undefined }, Date.now()) : latest
+      if (signal.aborted || isRateLimited(message)) {
+        const stopped = signal.aborted ? pauseSnowball(base, 'Paused.') : slowdownSnowball(base)
+        await saveSnowball(stopped)
         patch({ phase: { type: 'idle' } })
-        notify(SLOWDOWN_MESSAGE)
+        await writePartial(stopped)
         return
       }
-      await saveSnowball(applyScore(latest, { username, followers, posts: [], error: message }))
+      await saveSnowball(applyScore(latest, { username, followers, posts: gridRead ? posts : [], error: message }))
       snowballAgain = true
     }
     return
@@ -345,7 +353,10 @@ async function runOnce(): Promise<void> {
       maxId = page.nextMaxId
     }
     if (signal.aborted) {
-      await saveSnowball(pauseSnowball(latest, 'Paused.'))
+      const paused = pauseSnowball(latest, 'Paused.')
+      await saveSnowball(paused)
+      patch({ phase: { type: 'idle' } })
+      await writePartial(paused)
       return
     }
     await saveSnowball(markExpanded(applyCandidates(latest, username, incoming), username))
@@ -353,9 +364,10 @@ async function runOnce(): Promise<void> {
   } catch (error) {
     const message = humanError(error)
     if (signal.aborted || isRateLimited(message)) {
-      await saveSnowball(signal.aborted ? pauseSnowball(latest, 'Paused.') : slowdownSnowball(latest))
+      const stopped = signal.aborted ? pauseSnowball(latest, 'Paused.') : slowdownSnowball(latest)
+      await saveSnowball(stopped)
       patch({ phase: { type: 'idle' } })
-      if (!signal.aborted) notify(SLOWDOWN_MESSAGE)
+      await writePartial(stopped)
       return
     }
     await saveSnowball(markExpanded(applyCandidates(latest, username, incoming), username))
@@ -383,7 +395,9 @@ export async function resumeSnowballRun(): Promise<void> {
 export async function markSnowballPaused(note?: string): Promise<void> {
   const job = await loadSnowball()
   if (!job || job.status !== 'running') return
-  await saveSnowball(pauseSnowball(job, note))
+  const paused = pauseSnowball(job, note)
+  await saveSnowball(paused)
+  await writePartial(paused)
 }
 
 export async function markSnowballResumed(): Promise<SnowballJob | null> {

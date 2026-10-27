@@ -15,6 +15,9 @@ import {
   resumeSnowball,
   slowdownSnowball,
   snowballAccountTable,
+  snowballHasExport,
+  snowballReelTable,
+  snowballWorkbookSheets,
   type IncomingCandidate,
   type SearchHit,
   type SnowballJob,
@@ -303,5 +306,23 @@ describe('snowball graph', () => {
     expect(table[1]?.[1]).toBe('STRONG')
     expect(table[1]?.[8]).toBe('seed')
     expect(provenanceText([{ from: 'ada', via: 'following' }, { from: 'bea', via: 'following' }])).toBe('followed by ada, bea')
+  })
+
+  it('writes the same grade, depth, and reel rows when a scored run slows down', () => {
+    const scored = applyScore(createSnowball(['ada'], {}, DAY), { username: 'ada', followers: 80_000, posts: strongPosts('ada') }, DAY)
+    const paused = slowdownSnowball(scored, DAY)
+    expect(snowballHasExport(paused)).toBe(true)
+    expect(snowballHasExport(createSnowball(['ada'], {}, DAY))).toBe(false)
+    const accounts = snowballAccountTable(paused.accounts)
+    expect(accounts[1]?.[1]).toBe('STRONG')
+    expect(accounts[1]?.[2]).toBe(0)
+    const reels = snowballReelTable(paused.accounts)
+    expect(reels.length).toBe(1 + strongPosts('ada').length)
+    expect(reels[1]?.[1]).toBe('STRONG')
+    expect(reels[1]?.[2]).toBe(0)
+    expect(reels[1]?.[3]).toBe('ada-s0')
+    const sheets = snowballWorkbookSheets(paused).map((sheet) => sheet.name)
+    expect(sheets).toEqual(['Accounts', 'Reels', 'Queue'])
+    expect(snowballWorkbookSheets(scored)[1]?.rows).toEqual(reels)
   })
 })

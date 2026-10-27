@@ -1,3 +1,38 @@
+# Instagram Feed Sorter v0.4.8
+
+Later Reels pages that contain only a shortcode now count toward the requested total. The grid reader still does not call another API to fill that gap. Snowball never calls `web_profile_info` for a seed or a scored account. Expansion uses the id, follower count, and suggested accounts saved while that profile's Reels page was open, then the following list or chaining only when an id was already saved. A pause or a rate limit writes the same CSV and Excel file as a finished run: accounts with grade and depth, plus a Reels sheet. A run with no scored accounts still writes nothing. Still read-only. No new paid service and no Instagram writes.
+
+## Install the extension
+
+Download **instagram-feed-sorter-v0.4.8.zip** and **SHA256SUMS.txt**. From the folder that contains both, run `sha256sum -c SHA256SUMS.txt`. Extract the extension zip, then use Developer mode → Load unpacked in desktop Chrome or Edge. Select the folder that contains `manifest.json`. The manifest version is **0.4.8**. Sign in to Instagram yourself and open a profile's Reels tab. Reload the extension after replacing an older unpacked folder, then refresh Instagram.
+
+No Node.js, API key, or server is needed for sorting, batching, snowball research, or file export. This is a desktop Chromium build.
+
+## Install the video breakdown CLI
+
+Download **instagram-feed-sorter-breakdown-v0.4.8.zip**. It contains `breakdown.py`, `requirements.txt`, and `INSTALL.md`. ffmpeg and ffprobe are required. tesseract and faster-whisper are optional and free. Follow `INSTALL.md` inside the zip. This script is experimental.
+
+## Quickstart
+
+- **Research panel.** On an Instagram tab, choose Research. The panel scrolls. Paste handles. Snowball also has a Keywords field, plus Max to expand (20) and Max depth (2). Set Reels per account. Run Batch or Snowball. Snowball lists each account as STRONG, MAYBE, or WEAK with its depth, then the reels table. Export, Download top 10, and Sync are one click.
+- **Shortcode pages.** A page of edges that are only `{ code }` counts as reels for the open profile. Photos stay photos. The capture stops at the requested count.
+- **No web_profile_info.** Seeds and scored accounts are expanded from data saved on their Reels page. A missing id skips following and chaining.
+- **Partial save.** Pause, the daily cap, and “Instagram asked us to slow down — wait at least a few hours” each write the Accounts, Reels, and Queue sheets when at least one account has a grade.
+- **Slow down.** HTTP 429 or `feedback_required` stops the run and asks you to wait at least a few hours. Resume stays disabled for four hours. Accounts are spaced 8–20 seconds apart. The daily cap defaults to 25 scored accounts.
+- **Request log.** Each account line shows the HTTP status, URL, reel count, and pages fetched.
+- **Account finder.** On a profile or Reels tab, Find accounts stays on the right.
+- **Sheets and Notion.** Options page. Both stay off until you enable them.
+- **Video breakdown.** Download top N, then `python3 breakdown.py "rank01_ada_AbC.mp4" --out breakdowns --whisper-model tiny`.
+
+## Included
+
+- Shortcode-only grid edges are reels on the Reels tab. A later image response does not downgrade a reel already captured. Media ids still stay distinct, and `product_type` `clips` still counts.
+- Snowball records zero `web_profile_info` calls. The saved profile id is what following and chaining use after the tab navigates away.
+- A paused snowball exports the same workbook as a finished run, including each reel's grade and depth.
+- v0.4.7, below, is included.
+
+For updates, replace files in the same loaded folder, reload the extension, then refresh Instagram. Check `SHA256SUMS.txt` against every asset on this release. A folder that still says manifest 0.4.7 is an older build.
+
 # Instagram Feed Sorter v0.4.7
 
 Later pages of a Reels grid count. A short `items` list no longer hides the clips on that page, nearby media ids stay distinct, and a clip without `media_type` still counts as a reel. A profile the tab is already on is not requested with `web_profile_info`. HTTP 429 or `feedback_required` stops the batch or snowball, saves it, and shows “Instagram asked us to slow down — wait at least a few hours”. Resume stays off for four hours. Accounts wait a random 8–20 seconds, and the daily cap defaults to 25. The research panel scrolls, and snowball shows STRONG, MAYBE, or WEAK with depth. Still read-only. No new paid service and no Instagram writes.

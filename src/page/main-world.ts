@@ -1,4 +1,12 @@
-import { extractFollowerCounts, extractItems, extractSearchUsers, extractUserId, extractUsers } from '../lib/instagram/extract'
+import { extractFollowerCounts, extractItems, extractSearchUsers, extractUsers } from '../lib/instagram/extract'
+import {
+  followingRequest,
+  profileMemory,
+  rememberProfile,
+  similarRequest,
+  type ProfileMemory,
+  type ProfileStorage,
+} from '../lib/profile-cache'
 import { requestMatchesKeyword } from '../lib/page-accounts'
 import { hashtagUrl } from '../lib/instagram/search'
 import { isInstagramDataUrl, parseBodies, rememberPosts } from '../lib/instagram/capture'
@@ -119,42 +127,25 @@ function cachedUserId(username: string): string | undefined {
   return userIds.get(username.toLowerCase()) || userIdFromPage(username)
 }
 
-let nextProfileAt = 0
-
 async function waitForPageId(username: string): Promise<string | undefined> {
   const deadline = Date.now() + 4000
   while (Date.now() < deadline) {
-    const id = cachedUserId(username)
+    const id = cachedUserId(username) || savedProfile(username)?.id
     if (id) return id
     await wait(250)
   }
-  return cachedUserId(username)
-}
-
-async function webProfile(username: string): Promise<unknown> {
-  const gap = nextProfileAt - Date.now()
-  if (gap > 0) await wait(gap)
-  nextProfileAt = Date.now() + 1200
-  try {
-    return await igFetch(`https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`)
-  } catch (error) {
-    if (error instanceof HttpError && error.status === 429) nextProfileAt = Date.now() + 15_000
-    throw error
-  }
+  return cachedUserId(username) || savedProfile(username)?.id
 }
 
 async function profile(username: string): Promise<unknown> {
   scanEmbedded()
-  const known = cachedUserId(username) || (viewingProfile(username) ? await waitForPageId(username) : undefined)
+  const known = cachedUserId(username) || savedProfile(username)?.id || (viewingProfile(username) ? await waitForPageId(username) : undefined)
   if (known) {
     userIds.set(username.toLowerCase(), known)
+    stashProfile(username, { id: known })
     return { data: { user: { id: known } } }
   }
-  // The open profile page already has this account. Do not ask web_profile_info for it.
-  if (viewingProfile(username)) return { data: { user: {} } }
-  const raw = await webProfile(username)
-  ingest(raw)
-  return raw
+  return { data: { user: {} } }
 }
 
 function exceptTarget(username: string, accounts: SimilarAccount[]): SimilarAccount[] {
@@ -193,52 +184,47 @@ function viewingProfile(username: string): boolean {
   return first === username.toLowerCase()
 }
 
+function savedSuggestions(memory: ProfileMemory | undefined): SimilarAccount[] {
+  return (memory?.suggested ?? []).map((account) => ({
+    id: account.username,
+    username: account.username,
+    fullName: '',
+    verified: false,
+    url: `https://www.instagram.com/${account.username}/`,
+    followers: account.followers,
+    avatarUrl: null,
+    isPrivate: false,
+    category: null,
+    biography: null,
+  }))
+}
+
 async function similarTo(username: string): Promise<SimilarAccount[]> {
   if (viewingProfile(username)) {
     const embedded = exceptTarget(username, relatedInDocument())
-    if (embedded.length > 0) return embedded
+    if (embedded.length > 0) {
+      stashProfile(username, {
+        id: cachedUserId(username),
+        suggested: embedded.map((account) => ({ username: account.username, followers: account.followers })),
+      })
+      return embedded
+    }
   }
 
-  let id = cachedUserId(username) || (viewingProfile(username) ? await waitForPageId(username) : undefined)
-  let lastError: unknown
-  let profilePayload: unknown = null
-  if (!id && viewingProfile(username)) return exceptTarget(username, relatedInDocument())
-  if (!id) {
-    profilePayload = await webProfile(username).catch((error: unknown) => {
-      lastError = error
-      if (hardLimit(error)) throw error
-      return null
-    })
-  }
-  if (profilePayload) {
-    ingest(profilePayload)
-    const found = exceptTarget(username, extractUsers(profilePayload))
-    if (found.length > 0) return found
-    id = id || extractUserId(profilePayload)
-  }
-  if (!id) {
-    if (lastError) throw lastError
-    return []
-  }
+  const id = cachedUserId(username) || savedProfile(username)?.id || (viewingProfile(username) ? await waitForPageId(username) : undefined)
+  if (id) stashProfile(username, { id })
+  const memory = savedProfile(username)
+  const captured = exceptTarget(username, savedSuggestions(memory))
+  if (captured.length > 0 || !similarRequest(memory)) return captured
 
-  const urls = [
-    `https://www.instagram.com/api/v1/discover/chaining/?target_id=${encodeURIComponent(id)}&module=profile`,
-    `https://www.instagram.com/api/v1/discover/chaining/?target_id=${encodeURIComponent(id)}`,
-  ]
-  let sawResponse = false
-  for (const url of urls) {
-    const raw = await fetchOnce(url).catch((error: unknown) => {
-      if (hardLimit(error)) throw error
-      lastError = error
-      return null
-    })
-    if (!raw) continue
-    sawResponse = true
-    const found = exceptTarget(username, extractUsers(raw))
-    if (found.length > 0) return found
-  }
-  if (!sawResponse && lastError) throw lastError
-  return []
+  const url = similarRequest(memory)
+  if (!url) return []
+  const raw = await fetchOnce(url).catch((error: unknown) => {
+    if (hardLimit(error)) throw error
+    return null
+  })
+  if (!raw) return []
+  return exceptTarget(username, extractUsers(raw))
 }
 
 function withMax(url: string, maxId?: string): string {
@@ -456,8 +442,35 @@ function followersFromDom(): number | null {
   return null
 }
 
+function profileStore(): ProfileStorage {
+  return sessionStorage
+}
+
+function savedProfile(username: string): ProfileMemory | undefined {
+  try {
+    return profileMemory(profileStore(), username)
+  } catch {
+    return undefined
+  }
+}
+
+function stashProfile(username: string, patch: Partial<ProfileMemory>): void {
+  if (!username) return
+  try {
+    rememberProfile(profileStore(), username, patch)
+  } catch {
+    // sessionStorage can be blocked. The page data already in memory still serves this document.
+  }
+}
+
+function onReelsGrid(): boolean {
+  const parts = location.pathname.split('/').filter(Boolean)
+  return (parts[1] || '').toLowerCase() === 'reels' && openProfileUsername() !== ''
+}
+
 function ingest(raw: unknown): void {
-  rememberPosts(captured, raw, openProfileUsername())
+  const profileName = openProfileUsername()
+  rememberPosts(captured, raw, profileName, onReelsGrid())
   for (const account of extractUsers(raw)) {
     const key = account.username.toLowerCase()
     const existing = capturedAccounts.get(key)
@@ -465,43 +478,46 @@ function ingest(raw: unknown): void {
   }
   for (const [username, count] of extractFollowerCounts(raw)) followerCounts.set(username, count)
   rememberIds(raw)
+  if (!profileName) return
+  const key = profileName.toLowerCase()
+  const suggested = extractUsers(raw, false)
+    .filter((account) => account.username.toLowerCase() !== key)
+    .map((account) => ({ username: account.username, followers: account.followers }))
+  const followers = followerCounts.get(key) ?? followersFromDom()
+  stashProfile(profileName, {
+    id: userIds.get(key),
+    followers: followers ?? undefined,
+    suggested,
+  })
 }
 
 async function followingPage(username: string, maxId?: string): Promise<unknown> {
-  let id: string | undefined
-  if (viewingProfile(username)) {
-    scanEmbedded()
-    id = cachedUserId(username) || (await waitForPageId(username))
-    if (!id) return { users: [] }
-  } else {
-    const info = await profile(username)
-    id = extractUserId(info)
-    if (!id) throw new HttpError('Instagram did not return that profile.', 404)
-  }
-  const url = new URL(`https://www.instagram.com/api/v1/friendships/${encodeURIComponent(id)}/following/`)
-  url.searchParams.set('count', '12')
-  if (maxId) url.searchParams.set('max_id', maxId)
-  return igFetch(url.toString())
+  scanEmbedded()
+  const id = cachedUserId(username) || savedProfile(username)?.id || (viewingProfile(username) ? await waitForPageId(username) : undefined)
+  if (!id) return { users: [] }
+  stashProfile(username, { id })
+  const url = followingRequest(savedProfile(username), maxId)
+  if (!url) return { users: [] }
+  return igFetch(url)
 }
 
 async function followers(username: string): Promise<number | null> {
   const key = username.toLowerCase()
   if (!key) return null
+  const saved = savedProfile(username)
+  if (saved?.followers != null) return saved.followers
   scanEmbedded()
   const known = followerCounts.get(key)
   if (known != null) return known
   if (viewingProfile(username)) {
     const fromDom = followersFromDom()
-    if (fromDom != null) followerCounts.set(key, fromDom)
+    if (fromDom != null) {
+      followerCounts.set(key, fromDom)
+      stashProfile(username, { followers: fromDom })
+    }
     return fromDom
   }
-  try {
-    ingest(await webProfile(username))
-  } catch (error) {
-    if (hardLimit(error)) throw error
-    return null
-  }
-  return followerCounts.get(key) ?? null
+  return null
 }
 
 function bodyText(body: unknown): string {

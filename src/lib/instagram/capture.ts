@@ -10,7 +10,15 @@ export function quoteLargeIds(text: string): string {
 }
 
 function parseJson(body: string): unknown {
-  return JSON.parse(quoteLargeIds(body)) as unknown
+  const parsed = JSON.parse(quoteLargeIds(body)) as unknown
+  if (typeof parsed !== 'string') return parsed
+  const inner = parsed.trim()
+  if (!inner.startsWith('{') && !inner.startsWith('[')) return parsed
+  try {
+    return JSON.parse(quoteLargeIds(inner)) as unknown
+  } catch {
+    return parsed
+  }
 }
 
 export function parseBodies(text: string): unknown[] {
@@ -35,9 +43,9 @@ export function parseBodies(text: string): unknown[] {
 }
 
 /** Keep every distinct shortcode. A numeric pk is not the key, because nearby ids collapse in JSON numbers. */
-export function rememberPosts(into: Map<string, Post>, raw: unknown, fallbackUsername = ''): void {
+export function rememberPosts(into: Map<string, Post>, raw: unknown, fallbackUsername = '', reelsGrid = false): void {
   for (const item of extractItems(raw, 80)) {
-    const post = normalizeMedia(item, fallbackUsername)
+    const post = normalizeMedia(item, fallbackUsername, reelsGrid)
     if (!post) continue
     const key = post.shortcode || post.id
     into.set(key, mergePost(into.get(key), post))
@@ -68,6 +76,7 @@ export function mergePost(previous: Post | undefined, next: Post): Post {
   const merged: Post = { ...previous }
   for (const [key, value] of Object.entries(next) as [keyof Post, Post[keyof Post]][]) {
     if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) continue
+    if (key === 'mediaKind' && previous.mediaKind === 'video' && value === 'image') continue
     ;(merged as unknown as Record<string, unknown>)[key] = value
   }
   return merged

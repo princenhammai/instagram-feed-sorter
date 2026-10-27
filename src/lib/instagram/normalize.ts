@@ -1,4 +1,4 @@
-import { instagramIdToMs } from './ids'
+import { instagramIdToMs, shortcodeToId } from './ids'
 import type { MediaKind, Post, Slide } from '../types'
 
 function asCount(...values: unknown[]): number | null {
@@ -72,7 +72,9 @@ interface Raw {
   id?: string | number
   code?: string
   shortcode?: string
-  media_type?: number
+  media_code?: string
+  media_type?: number | string
+  is_video?: boolean
   product_type?: string
   taken_at?: number
   taken_at_timestamp?: number
@@ -177,24 +179,59 @@ function slidesOf(items: Raw[]): Slide[] {
   return slides
 }
 
-export function normalizeMedia(raw: unknown, fallbackUsername = ''): Post | null {
+function numericId(value: unknown): string {
+  const text = String(value ?? '').split('_')[0]
+  return /^\d+$/.test(text) ? text : ''
+}
+
+function explicitPhoto(media: Raw): boolean {
+  const type = media.media_type
+  if (type === 1 || type === 8) return true
+  if (typeof type !== 'string') return false
+  const text = type.toUpperCase()
+  return text === '1' || text === '8' || text === 'PHOTO' || text === 'IMAGE' || text === 'CAROUSEL'
+}
+
+function explicitVideo(media: Raw, videoUrl: string | null): boolean {
+  if (videoUrl) return true
+  if (media.is_video === true) return true
+  const type = media.media_type
+  if (type === 2) return true
+  if (typeof type === 'string' && ['2', 'VIDEO', 'CLIPS'].includes(type.toUpperCase())) return true
+  if (
+    media.product_type === 'clips' ||
+    media.product_type === 'igtv' ||
+    media.product_type === 'reel' ||
+    media.product_type === 'clips_preview'
+  ) {
+    return true
+  }
+  return Boolean(media.clips_metadata && typeof media.clips_metadata === 'object')
+}
+
+export function normalizeMedia(raw: unknown, fallbackUsername = '', reelsGrid = false): Post | null {
   if (!raw || typeof raw !== 'object') return null
   const media = raw as Raw
-  const id = String(media.pk ?? media.id ?? '').split('_')[0]
-  const shortcode = String(media.code || media.shortcode || id || '')
+  const coded = String(media.code || media.shortcode || media.media_code || '')
+  let id = numericId(media.pk ?? media.id)
+  if (!id && coded) {
+    try {
+      id = shortcodeToId(coded)
+    } catch {
+      id = coded
+    }
+  }
+  const shortcode = coded || id
   if (!id || !shortcode) return null
 
   const carousel = Array.isArray(media.carousel_media) && media.carousel_media.length > 0
   const slides = carousel ? slidesOf(media.carousel_media ?? []) : []
   const videoUrl = carousel ? null : bestVideo(media)
-  const clip =
-    media.product_type === 'clips' ||
-    media.product_type === 'igtv' ||
-    media.product_type === 'reel' ||
-    media.product_type === 'clips_preview'
+  const clip = explicitVideo(media, videoUrl)
   let mediaKind: MediaKind = 'image'
   if (carousel && slides.length > 0) mediaKind = 'carousel'
-  else if (videoUrl || media.media_type === 2 || clip) mediaKind = 'video'
+  else if (clip) mediaKind = 'video'
+  else if (reelsGrid && !explicitPhoto(media)) mediaKind = 'video'
 
   const reel = clip || mediaKind === 'video'
   const captionUser = media.caption && typeof media.caption === 'object' ? media.caption.user?.username : ''
