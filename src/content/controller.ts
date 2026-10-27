@@ -8,6 +8,7 @@ import { exportColumns, objectsToTable, sortableName, table, tableToCsv, tableTo
 import { humanError } from '../lib/format'
 import { headline } from '../lib/headline'
 import { downloadName, filesForPost, safeSegment, zipStem, type RemoteFile } from '../lib/media-files'
+import { buildReelExport } from '../lib/reel-export'
 import { withEngagement, withOutlierScores } from '../lib/outlier'
 import { isRateLimit } from '../lib/instagram/page-data'
 import { rangeError, resolveRange } from '../lib/range'
@@ -725,6 +726,49 @@ export async function exportPosts(surface: Surface, posts: Post[], format: Expor
   }
 }
 
+const SORT_FIRST = 'Sort the profile first'
+let exportUsername = ''
+let exportPostsInOrder: Post[] = []
+
+export function registerReelExport(username: string, posts: Post[]): void {
+  exportUsername = username
+  exportPostsInOrder = posts
+}
+
+export async function exportCapturedReels(
+  posts: Post[],
+  username: string,
+  includeAds: boolean,
+  mode: 'download' | 'copy',
+): Promise<{ ok: boolean; error?: string; tsv?: string }> {
+  if (posts.length === 0) {
+    notify(SORT_FIRST)
+    return { ok: false, error: SORT_FIRST }
+  }
+  const built = buildReelExport(posts, { includeAds, username: username || posts[0]?.username || 'profile', now: new Date() })
+  if (built.rows === 0) {
+    notify(SORT_FIRST)
+    return { ok: false, error: SORT_FIRST }
+  }
+  if (mode === 'copy') {
+    try {
+      await copyText(built.tsv)
+    } catch (error) {
+      return { ok: false, error: humanError(error), tsv: built.tsv }
+    }
+    notify(`Copied ${built.rows} rows.`)
+    return { ok: true, tsv: built.tsv }
+  }
+  try {
+    await send({ type: 'DOWNLOAD_TEXT', filename: downloadName(built.filename), mime: 'text/csv;charset=utf-8', text: built.csv })
+  } catch (error) {
+    notify(humanError(error))
+    return { ok: false, error: humanError(error) }
+  }
+  notify(`Exported ${built.rows} reels.`)
+  return { ok: true }
+}
+
 export async function openSimilar(username: string): Promise<void> {
   patch({ similar: { open: true, loading: true, accounts: [], error: null } })
   try {
@@ -931,6 +975,12 @@ export function onMessage(
     }
     sendResponse(requestSort(message.range, message.sortKey))
     return false
+  }
+  if (message?.type === 'EXPORT_REELS') {
+    const includeAds = Boolean((message as { includeAds?: unknown }).includeAds)
+    const mode = (message as { action?: unknown }).action === 'copy' ? 'copy' : 'download'
+    void exportCapturedReels(exportPostsInOrder, exportUsername, includeAds, mode).then(sendResponse)
+    return true
   }
   if (message?.type === 'DOWNLOAD_CURRENT') {
     void downloadCurrent().then(sendResponse)

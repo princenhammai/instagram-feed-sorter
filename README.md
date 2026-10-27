@@ -36,6 +36,12 @@ The extension is portable across desktop operating systems. GitHub hosting does 
 - Select 25, 50, 100, 200, 1000, all or a custom number; use date presets or a custom range where supported.
 - Filter results and inspect them in the built-in player or on Instagram.
 - Export Google Sheets, Excel, CSV, JSON or clipboard data.
+
+## Export the sorted Reels
+
+After you sort a profile, **Export** on the popup or the sorted panel downloads the Reels already captured, in the current sort order. It does not load more posts. Ads and paid partnerships stay out unless **Include ads** is checked. **Copy table** puts the same rows on the clipboard as tab-separated text for Google Sheets.
+
+The file is `<username>-reels-YYYY-MM-DD.csv` in an `Instagram Feed Sorter` folder. It is UTF-8 with a byte order mark so Excel keeps Vietnamese captions. Columns are rank, username, shortcode, url, views, likes, comments, posted date (ISO), caption (first 200 characters), duration seconds, outlier score (views divided by that account's median views), and is_ad. If nothing has been captured yet, the extension shows “Sort the profile first” and does not write a file.
 - Download media and keep posts in local folders with the Library.
 - Optional video transcription using your own Whisper-compatible provider/key.
 - View related accounts suggested by Instagram from the Sorter overlay.

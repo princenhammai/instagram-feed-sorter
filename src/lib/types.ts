@@ -27,6 +27,10 @@ export interface Post {
   videoLowUrl?: string | null
   outlierScore?: number | null
   engagementRate?: number | null
+  /** Set from the captured media when Instagram marked a paid partnership. */
+  paidPartnership?: boolean
+  /** Set from an ad flag already present on the captured media. */
+  isAd?: boolean
 }
 
 export type Surface =

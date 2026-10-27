@@ -49,6 +49,8 @@ export function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [showSettings, setShowSettings] = useState(false)
   const [error, setError] = useState('')
+  const [includeAds, setIncludeAds] = useState(false)
+  const [exportNote, setExportNote] = useState('')
   const [busy, setBusy] = useState<SortKey | 'download' | null>(null)
   const [bridgeOn, setBridgeOn] = useState(false)
 
@@ -133,6 +135,31 @@ export function App() {
       setError('This Instagram tab has not loaded the extension yet. Refresh it, then try again.')
     } finally {
       setBusy(null)
+    }
+  }
+
+  async function exportCaptured(action: 'download' | 'copy') {
+    setExportNote('')
+    setError('')
+    try {
+      const tab = await activeTab()
+      const response = (await chrome.tabs.sendMessage(tab.id as number, {
+        type: 'EXPORT_REELS',
+        includeAds,
+        action,
+      })) as { ok?: boolean; error?: string; tsv?: string } | undefined
+      if (!response?.ok) {
+        setExportNote(response?.error || 'Sort the profile first')
+        return
+      }
+      if (action === 'copy' && response.tsv) {
+        await navigator.clipboard.writeText(response.tsv)
+        setExportNote('Copied the table.')
+        return
+      }
+      setExportNote('Export saved.')
+    } catch {
+      setExportNote('Sort the profile first')
     }
   }
 
@@ -352,6 +379,23 @@ export function App() {
           </div>
         </section>
       )}
+
+      <section className="card">
+        <p className="label">Export</p>
+        <label className="check">
+          <input type="checkbox" checked={includeAds} onChange={(event) => setIncludeAds(event.target.checked)} />
+          Include ads
+        </label>
+        <div className="row">
+          <button type="button" className="primary" onClick={() => void exportCaptured('download')}>
+            Export
+          </button>
+          <button type="button" onClick={() => void exportCaptured('copy')}>
+            Copy table
+          </button>
+        </div>
+        {exportNote && <p className="muted">{exportNote}</p>}
+      </section>
 
       {error && <p className="error">{error}</p>}
 

@@ -7,8 +7,10 @@ import {
   createFolder,
   downloadPosts,
   downloadShortcode,
+  exportCapturedReels,
   exportPosts,
   exportSimilar,
+  registerReelExport,
   listFolders,
   openInstagram,
   openSimilar,
@@ -161,11 +163,17 @@ function Workspace({ model }: { model: ReadyModel }) {
   const [selected, setSelected] = useState<string[]>([])
   const [detailId, setDetailId] = useState<string | null>(null)
   const [menu, setMenu] = useState<'sort' | 'export' | null>(null)
+  const [includeAds, setIncludeAds] = useState(false)
   const [query, setQuery] = useState('')
   const [shown, setShown] = useState(PAGE)
   const sentinel = useRef<HTMLDivElement | null>(null)
 
   const sorted = useMemo(() => sortPosts(model.posts, sortKey), [model.posts, sortKey])
+  const profileName = 'username' in model.surface ? model.surface.username : sorted[0]?.username || ''
+  useEffect(() => {
+    registerReelExport(profileName, sorted)
+    return () => registerReelExport('', [])
+  }, [profileName, sorted])
   const searched = useMemo(() => searchPosts(sorted, query), [sorted, query])
   const visible = useMemo(() => applyFilters(searched, applied), [searched, applied])
   const bolts = useMemo(() => boltTiers(sortKey === 'outlier' ? visible : []), [sortKey, visible])
@@ -239,6 +247,16 @@ function Workspace({ model }: { model: ReadyModel }) {
           {outlierWarning && <p className="note">{outlierWarning}</p>}
         </div>
         <div className="actions">
+          <label className="include-ads">
+            <input type="checkbox" checked={includeAds} onChange={(event) => setIncludeAds(event.target.checked)} />
+            Include ads
+          </label>
+          <button type="button" className="outline" onClick={() => void exportCapturedReels(sorted, profileName, includeAds, 'download')}>
+            Export
+          </button>
+          <button type="button" className="outline" onClick={() => void exportCapturedReels(sorted, profileName, includeAds, 'copy')}>
+            Copy table
+          </button>
           {similarAllowed(model.surface) && (
             <button type="button" className="ghost" onClick={() => void openSimilar(usernameOf(model.surface))}>
               Related accounts
