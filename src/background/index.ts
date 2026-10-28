@@ -4,6 +4,7 @@ import { isAllowedMediaUrl, isInstagramUrl } from '../lib/media-files'
 import { sapisidToken, sheetUploadBody } from '../lib/sheets'
 import { loadSettings } from '../lib/settings'
 import { offscreenDocumentExists } from '../lib/offscreen'
+import { saveTextDownload } from '../lib/text-download'
 import { DEFAULT_TRANSCRIBE_ENDPOINT, type Post } from '../lib/types'
 
 const SHEETS_URL = 'https://docs.google.com/spreadsheets/create'
@@ -353,7 +354,17 @@ async function handle(message: Record<string, unknown>, sender: chrome.runtime.M
     }
   }
 
-  if (message.type === 'DOWNLOAD_TEXT' || message.type === 'DOWNLOAD_BYTES') {
+  if (message.type === 'DOWNLOAD_TEXT') {
+    const filename = cleanFilename(message.filename)
+    if (!filename || typeof message.mime !== 'string' || typeof message.text !== 'string') {
+      return { ok: false, error: 'Could not name that export.' }
+    }
+    // Data URLs are read by the downloads API itself. A blob URL from the
+    // offscreen page is often gone before Chrome starts writing the file.
+    return saveTextDownload(chrome.downloads, { filename, mime: message.mime, text: message.text })
+  }
+
+  if (message.type === 'DOWNLOAD_BYTES') {
     const filename = cleanFilename(message.filename)
     if (!filename || typeof message.mime !== 'string') return { ok: false, error: 'Could not name that export.' }
     await ensureOffscreen()
@@ -362,7 +373,6 @@ async function handle(message: Record<string, unknown>, sender: chrome.runtime.M
       type: 'FILE',
       filename,
       mime: message.mime,
-      text: message.text,
       base64: message.base64,
       saveAs: Boolean(message.saveAs),
     })

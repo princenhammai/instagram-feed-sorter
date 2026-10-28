@@ -58,6 +58,103 @@ export function toCsv(columns: Column[], posts: Post[]): string {
   return `\uFEFF${lines.join('\r\n')}`
 }
 
+export const DATA_EXPORT_HEADERS = [
+  'rank',
+  'username',
+  'shortcode',
+  'url',
+  'views',
+  'likes',
+  'comments',
+  'outlier_x',
+  'date',
+  'duration_s',
+  'caption',
+  'video_url',
+] as const
+
+export interface DataExportRecord {
+  rank: number
+  username: string
+  shortcode: string
+  url: string
+  views: number | null
+  likes: number | null
+  comments: number | null
+  outlier_x: number | null
+  date: string
+  duration_s: number | null
+  caption: string
+  video_url: string
+}
+
+function isoDate(ms: number): string {
+  if (!ms) return ''
+  const date = new Date(ms)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toISOString()
+}
+
+function finiteOrNull(value: number | null | undefined): number | null {
+  return value == null || !Number.isFinite(value) ? null : value
+}
+
+function videoUrlOf(post: Post): string {
+  if (post.videoUrl) return post.videoUrl
+  return post.slides.find((slide) => slide.kind === 'video')?.url ?? ''
+}
+
+/** Rows stay in the order given. Rank starts at 1. Scoring is not recalculated. */
+export function dataExportRecords(posts: readonly Post[]): DataExportRecord[] {
+  return posts.map((post, index) => ({
+    rank: index + 1,
+    username: post.username,
+    shortcode: post.shortcode,
+    url: post.url || (post.shortcode ? `https://www.instagram.com/reel/${post.shortcode}/` : ''),
+    views: finiteOrNull(post.views),
+    likes: finiteOrNull(post.likes),
+    comments: finiteOrNull(post.comments),
+    outlier_x: round(post.outlierScore, 2),
+    date: isoDate(post.takenAt),
+    duration_s: finiteOrNull(post.duration),
+    caption: post.caption,
+    video_url: videoUrlOf(post),
+  }))
+}
+
+function recordCells(record: DataExportRecord): (string | number | null)[] {
+  return [
+    record.rank,
+    record.username,
+    record.shortcode,
+    record.url,
+    record.views,
+    record.likes,
+    record.comments,
+    record.outlier_x,
+    record.date,
+    record.duration_s,
+    record.caption,
+    record.video_url,
+  ]
+}
+
+export function dataExportCsv(posts: readonly Post[]): string {
+  const lines = [[...DATA_EXPORT_HEADERS], ...dataExportRecords(posts).map(recordCells)].map((row) => row.map(cell).join(','))
+  return `\uFEFF${lines.join('\r\n')}`
+}
+
+export function dataExportJson(posts: readonly Post[]): string {
+  return `${JSON.stringify(dataExportRecords(posts), null, 2)}\n`
+}
+
+export function dataExportFilename(username: string, now: Date, extension: 'csv' | 'json'): string {
+  const safe = username.trim().replace(/^@+/, '').replace(/[^A-Za-z0-9._-]/g, '') || 'profile'
+  const pad = (value: number) => String(value).padStart(2, '0')
+  const day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  return `ifs-${safe}-${day}.${extension}`
+}
+
 function tsvCell(value: string | number | null): string {
   if (value == null) return ''
   const text = String(value).replace(/[\t\r\n]+/g, ' ')
