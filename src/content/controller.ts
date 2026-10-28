@@ -4,10 +4,11 @@ import { downloadToFolder, pickFolder } from './downloads'
 import { CLOSED_SIMILAR, getSnap, notify, patch, type DownloadState } from './store'
 import type { Folder } from '../lib/db'
 import { collectPosts } from '../lib/instagram/collect'
-import { exportColumns, objectsToTable, sortableName, table, tableToCsv, tableToJson, tableToTsv, toCsv, toJson, toTsv } from '../lib/export'
+import { dataExportCsv, dataExportFilename, dataExportJson, exportColumns, objectsToTable, sortableName, table, tableToCsv, tableToJson, tableToTsv, toCsv, toTsv } from '../lib/export'
 import { humanError } from '../lib/format'
 import { headline } from '../lib/headline'
 import { downloadName, filesForPost, safeSegment, zipStem, type RemoteFile } from '../lib/media-files'
+import { buildReelExport } from '../lib/reel-export'
 import { withEngagement, withOutlierScores } from '../lib/outlier'
 import { isRateLimit } from '../lib/instagram/page-data'
 import { rangeError, resolveRange } from '../lib/range'
@@ -667,6 +668,29 @@ async function publishSheet(title: string, csv: string, tsv: string): Promise<vo
   }
 }
 
+function exportAccountName(surface: Surface, posts: Post[]): string {
+  if ('username' in surface && surface.username) return surface.username
+  return posts[0]?.username || 'profile'
+}
+
+async function downloadTextFile(
+  filename: string,
+  mime: string,
+  text: string,
+): Promise<{ ok: true; downloadId: number } | { ok: false; error: string }> {
+  const response = await send<{ ok?: boolean; downloadId?: number; error?: string }>({
+    type: 'DOWNLOAD_TEXT',
+    filename,
+    mime,
+    text,
+    saveAs: false,
+  })
+  if (!response?.ok || typeof response.downloadId !== 'number') {
+    return { ok: false, error: response?.error || 'Export failed.' }
+  }
+  return { ok: true, downloadId: response.downloadId }
+}
+
 export async function exportPosts(surface: Surface, posts: Post[], format: ExportFormat): Promise<void> {
   if (posts.length === 0) {
     notify('Nothing to export.')
@@ -698,15 +722,20 @@ export async function exportPosts(surface: Surface, posts: Post[], format: Expor
       await publishSheet(sortableName(isSortable(surface) ? surface : { kind: 'posts', username: 'instagram' }), toCsv(columns, posts), toTsv(columns, posts))
       return
     }
-    if (format === 'csv') {
-      await send({ type: 'DOWNLOAD_TEXT', filename: `${base}.csv`, mime: 'text/csv;charset=utf-8', text: toCsv(columns, posts) })
-    } else if (format === 'json') {
-      await send({
-        type: 'DOWNLOAD_TEXT',
-        filename: `${base}.json`,
-        mime: 'application/json',
-        text: toJson(columns, posts),
-      })
+    if (format === 'csv' || format === 'json') {
+      const account = exportAccountName(surface, posts)
+      const filename = dataExportFilename(account, new Date(), format)
+      const saved = await downloadTextFile(
+        filename,
+        format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json',
+        format === 'csv' ? dataExportCsv(posts) : dataExportJson(posts),
+      )
+      if (!saved.ok) {
+        notify(saved.error)
+        return
+      }
+      notify(`Exported ${posts.length} rows`)
+      return
     } else {
       const sheet = sortableName(isSortable(surface) ? surface : { kind: 'posts', username: 'instagram' })
       const bytes = await buildXlsx(sheet, table(columns, posts))
@@ -723,6 +752,71 @@ export async function exportPosts(surface: Surface, posts: Post[], format: Expor
     patch({ download: null })
     notify(humanError(error))
   }
+}
+
+const SORT_FIRST = 'Sort the profile first'
+let exportUsername = ''
+let exportPostsInOrder: Post[] = []
+
+export function registerReelExport(username: string, posts: Post[]): void {
+  exportUsername = username
+  exportPostsInOrder = posts
+}
+
+export type ReelExportKind = 'csv' | 'xlsx' | 'json' | 'copy' | 'download'
+
+export async function exportCapturedReels(
+  posts: Post[],
+  username: string,
+  includeAds: boolean,
+  mode: ReelExportKind,
+): Promise<{ ok: boolean; error?: string; tsv?: string }> {
+  if (posts.length === 0) {
+    notify(SORT_FIRST)
+    return { ok: false, error: SORT_FIRST }
+  }
+  const built = buildReelExport(posts, { includeAds, username: username || posts[0]?.username || 'profile', now: new Date() })
+  if (built.rows === 0) {
+    notify(SORT_FIRST)
+    return { ok: false, error: SORT_FIRST }
+  }
+  const kind = mode === 'download' ? 'csv' : mode
+  if (kind === 'copy') {
+    try {
+      await copyText(built.tsv)
+    } catch (error) {
+      return { ok: false, error: humanError(error), tsv: built.tsv }
+    }
+    notify(`Copied ${built.rows} rows.`)
+    return { ok: true, tsv: built.tsv }
+  }
+  const stem = built.filename.replace(/\.csv$/, '')
+  try {
+    if (kind === 'json' || kind === 'csv') {
+      const saved = await downloadTextFile(
+        downloadName(kind === 'json' ? `${stem}.json` : built.filename),
+        kind === 'json' ? 'application/json' : 'text/csv;charset=utf-8',
+        kind === 'json' ? built.json : built.csv,
+      )
+      if (!saved.ok) {
+        notify(saved.error)
+        return { ok: false, error: saved.error }
+      }
+    } else {
+      const bytes = await buildXlsx('Reels', built.sheet)
+      await send({
+        type: 'DOWNLOAD_BYTES',
+        filename: downloadName(`${stem}.xlsx`),
+        mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        base64: base64Of(bytes),
+      })
+    }
+  } catch (error) {
+    notify(humanError(error))
+    return { ok: false, error: humanError(error) }
+  }
+  notify(`Exported ${built.rows} reels.`)
+  return { ok: true }
 }
 
 export async function openSimilar(username: string): Promise<void> {
@@ -773,10 +867,16 @@ export async function exportSimilar(
       await publishSheet(`${username} similar accounts`, tableToCsv(tableRows), tableToTsv(tableRows))
       return
     }
-    if (format === 'csv') {
-      await send({ type: 'DOWNLOAD_TEXT', filename: `${base}.csv`, mime: 'text/csv;charset=utf-8', text: tableToCsv(tableRows) })
-    } else if (format === 'json') {
-      await send({ type: 'DOWNLOAD_TEXT', filename: `${base}.json`, mime: 'application/json', text: tableToJson(tableRows) })
+    if (format === 'csv' || format === 'json') {
+      const saved = await downloadTextFile(
+        `${base}.${format}`,
+        format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json',
+        format === 'csv' ? tableToCsv(tableRows) : tableToJson(tableRows),
+      )
+      if (!saved.ok) {
+        notify(saved.error)
+        return
+      }
     } else {
       const bytes = await buildXlsx('Similar', tableRows)
       await send({
@@ -931,6 +1031,13 @@ export function onMessage(
     }
     sendResponse(requestSort(message.range, message.sortKey))
     return false
+  }
+  if (message?.type === 'EXPORT_REELS') {
+    const includeAds = Boolean((message as { includeAds?: unknown }).includeAds)
+    const action = (message as { action?: unknown }).action
+    const mode = action === 'copy' || action === 'json' || action === 'xlsx' || action === 'csv' ? action : 'csv'
+    void exportCapturedReels(exportPostsInOrder, exportUsername, includeAds, mode).then(sendResponse)
+    return true
   }
   if (message?.type === 'DOWNLOAD_CURRENT') {
     void downloadCurrent().then(sendResponse)

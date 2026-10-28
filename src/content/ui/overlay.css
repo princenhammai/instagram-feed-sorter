@@ -29,6 +29,7 @@
 .note { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 
 .actions, .row, .filters, .card-actions { display: flex; gap: 8px; align-items: center; }
+.include-ads { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; }
 .actions { flex-wrap: wrap; justify-content: flex-end; }
 .actions.start { justify-content: flex-start; }
 .spread { justify-content: space-between; }

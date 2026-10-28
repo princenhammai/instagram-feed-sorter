@@ -100,5 +100,5 @@ button { cursor: pointer; }
 
 .primary { border: 0; border-radius: 10px; padding: 8px 10px; background: var(--accent); color: var(--accent-ink); font-weight: 700; }
 .primary:disabled { opacity: 0.5; }
-.settings label { display: flex; align-items: center; gap: 8px; }
+.settings label, .check { display: flex; align-items: center; gap: 8px; }
 .foot { display: flex; justify-content: space-between; padding: 0 2px; font-size: 11px; }

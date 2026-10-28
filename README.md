@@ -4,6 +4,8 @@ Sort Instagram Reels and posts by views, likes, comments, engagement, outlier sc
 
 **[Download the latest extension ZIP](https://github.com/princenhammai/instagram-feed-sorter/releases/latest)** · [Installation guide](INSTALL.md) · [Hướng dẫn tiếng Việt](docs/INSTALL.vi.md)
 
+**Latest release: v0.3.3.** Fixes CSV/JSON exports that reported success without saving a file. Download `instagram-feed-sorter-v0.3.3.zip` from the release Assets.
+
 No Node.js, API key, server or developer setup is needed for normal sorting. Each person uses their own signed-in Instagram session.
 
 ![Instagram Feed Sorter popup](docs/images/sorter-popup.jpg)
@@ -36,6 +38,14 @@ The extension is portable across desktop operating systems. GitHub hosting does 
 - Select 25, 50, 100, 200, 1000, all or a custom number; use date presets or a custom range where supported.
 - Filter results and inspect them in the built-in player or on Instagram.
 - Export Google Sheets, Excel, CSV, JSON or clipboard data.
+
+## Export the sorted Reels
+
+After you sort a profile, the popup and the sorted panel can save the Reels already captured, in the current sort order. They do not load more posts. Ads and paid partnerships stay out unless **Include ads** is checked.
+
+**Export CSV**, **Excel**, and **JSON** use the same columns. **Copy table** puts those rows on the clipboard as tab-separated text for Google Sheets. CSV is UTF-8 with a byte order mark so Excel keeps Vietnamese captions. Numbers stay numbers in Excel and JSON. A caption that starts with `=` is saved as text so a spreadsheet does not run it.
+
+Files are named `<username>-reels-YYYY-MM-DD` and land in an `Instagram Feed Sorter` folder. Columns are Rank, Username, Shortcode, URL, Views, Likes, Comments, Posted date (ISO), Caption (first 200 characters), Duration (s), Outlier score (views divided by that account's median views, two decimals), and Is ad. If nothing has been captured yet, the extension shows “Sort the profile first” and does not write a file.
 - Download media and keep posts in local folders with the Library.
 - Optional video transcription using your own Whisper-compatible provider/key.
 - View related accounts suggested by Instagram from the Sorter overlay.

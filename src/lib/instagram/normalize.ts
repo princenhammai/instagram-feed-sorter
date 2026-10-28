@@ -101,6 +101,10 @@ interface Raw {
   edge_liked_by?: { count?: number }
   edge_media_preview_like?: { count?: number }
   edge_media_to_comment?: { count?: number }
+  is_paid_partnership?: boolean
+  paid_partnership?: boolean
+  is_ad?: boolean
+  ad?: boolean
 }
 
 function slidesOf(items: Raw[]): Slide[] {
@@ -157,6 +161,8 @@ export function normalizeMedia(raw: unknown, fallbackUsername = ''): Post | null
     slides,
     duration: asCount(media.video_duration),
     videoLowUrl: carousel ? null : smallestVideo(media),
+    paidPartnership: media.is_paid_partnership === true || media.paid_partnership === true,
+    isAd: media.is_ad === true || media.ad === true,
   }
 }
 
