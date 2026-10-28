@@ -4,6 +4,8 @@ Sort Instagram Reels and posts by views, likes, comments, engagement, outlier sc
 
 **[Download the latest extension ZIP](https://github.com/princenhammai/instagram-feed-sorter/releases/latest)** · [Installation guide](INSTALL.md) · [Hướng dẫn tiếng Việt](docs/INSTALL.vi.md)
 
+**Latest release: v0.3.3.** Fixes CSV/JSON exports that reported success without saving a file. Download `instagram-feed-sorter-v0.3.3.zip` from the release Assets.
+
 No Node.js, API key, server or developer setup is needed for normal sorting. Each person uses their own signed-in Instagram session.
 
 ![Instagram Feed Sorter popup](docs/images/sorter-popup.jpg)

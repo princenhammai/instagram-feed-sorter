@@ -29,6 +29,10 @@ This release is a desktop Chromium extension. Chrome mobile, the Instagram mobil
 - Open Your library from the popup to find saved posts.
 - Transcription is optional and needs your own configured provider/API key.
 
+## Test CSV export in v0.3.3
+
+Refresh Instagram after updating, sort a small batch on a profile's Reels tab, then choose **Export data → CSV**. The file is saved to your browser's default downloads folder as `ifs-<username>-YYYY-MM-DD.csv`, without a separate save dialog. Check the browser's Downloads page if you cannot find it. JSON uses the same download path. Chrome must return a download ID before the extension reports success.
+
 ## Updating
 
 Replace the files inside the same loaded folder, click Reload in Extensions, then refresh Instagram. Keep the existing installation and folder path if you want to preserve local data.
